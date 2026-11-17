@@ -9,7 +9,7 @@ import java.nio.charset.StandardCharsets
 class AdbClient(
     val host: String,
     val port: Int = 5555,
-    private val timeoutMs: Int = 3000
+    private val timeoutMs: Int = 6000
 ) {
     suspend fun execute(command: String): Result<String> = withContext(Dispatchers.IO) {
         try {

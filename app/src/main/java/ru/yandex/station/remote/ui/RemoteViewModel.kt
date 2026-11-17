@@ -229,7 +229,11 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         vibrate(50)
         _uiState.value = _uiState.value.copy(activeMoviePlaying = null, lastMessage = "Остановлено: экран Алисы включен")
         viewModelScope.launch {
-            adbClient.execute("am force-stop com.softwinner.fireplayer; am force-stop org.smarttube.stable; am force-stop org.schabi.newpipe; am force-stop top.rootu.lampa; input keyevent 86; input keyevent 3; am start -n ru.yandex.quasar.app/.splash.SplashActivity -a android.intent.action.MAIN -c android.intent.category.HOME; am start -a android.intent.action.MAIN -c android.intent.category.HOME")
+            val cmd = "am force-stop com.softwinner.fireplayer; am force-stop org.smarttube.stable; am force-stop org.schabi.newpipe; am force-stop top.rootu.lampa; input keyevent 86; input keyevent 3; am start -a android.intent.action.MAIN -c android.intent.category.HOME"
+            val result = adbClient.execute(cmd)
+            if (result.isSuccess) {
+                _uiState.value = _uiState.value.copy(connectionStatus = StationConnectionStatus.CONNECTED)
+            }
         }
     }
 
@@ -607,10 +611,10 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     private fun executeCommand(command: String) {
         viewModelScope.launch {
             val result = adbClient.execute(command)
-            if (!result.isSuccess) {
-                _uiState.value = _uiState.value.copy(
-                    connectionStatus = StationConnectionStatus.UNAVAILABLE
-                )
+            if (result.isSuccess) {
+                if (_uiState.value.connectionStatus != StationConnectionStatus.CONNECTED) {
+                    _uiState.value = _uiState.value.copy(connectionStatus = StationConnectionStatus.CONNECTED)
+                }
             }
         }
     }

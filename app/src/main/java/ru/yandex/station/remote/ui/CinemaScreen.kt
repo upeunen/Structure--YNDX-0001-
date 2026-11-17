@@ -32,6 +32,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ru.yandex.station.remote.data.MovieItem
 
+import android.provider.OpenableColumns
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CinemaScreen(
@@ -42,15 +44,23 @@ fun CinemaScreen(
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
 
-    // Лаунчер для выбора .torrent файла на смартфоне
+    // Лаунчер для выбора .torrent файла на смартфоне через OpenDocument (SAF)
     val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let {
             try {
+                val fileName = try {
+                    context.contentResolver.query(it, null, null, null, null)?.use { cursor ->
+                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (cursor.moveToFirst() && nameIndex >= 0) {
+                            cursor.getString(nameIndex)
+                        } else null
+                    }
+                } catch (_: Exception) { null } ?: ("movie_" + System.currentTimeMillis() + ".torrent")
+
                 context.contentResolver.openInputStream(it)?.use { inputStream ->
                     val bytes = inputStream.readBytes()
-                    val fileName = "downloaded_" + System.currentTimeMillis() + ".torrent"
                     viewModel.uploadTorrentFileAndPlay(bytes, fileName)
                 }
             } catch (e: Exception) {
@@ -211,7 +221,7 @@ fun CinemaScreen(
                             }
 
                             Button(
-                                onClick = { filePickerLauncher.launch("*/*") },
+                                onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = DarkSurfaceElevated,

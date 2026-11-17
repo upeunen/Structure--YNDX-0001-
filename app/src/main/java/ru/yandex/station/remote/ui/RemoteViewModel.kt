@@ -216,19 +216,65 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // Управление мышью / сенсорной площадкой
-    fun moveCursor(deltaX: Float, deltaY: Float, sensitivity: Float = 2.4f) {
+    private var accumulatedDragX = 0f
+    private var accumulatedDragY = 0f
+    private val DRAG_THRESHOLD = 28f
+
+    fun onTouchpadDrag(deltaX: Float, deltaY: Float) {
+        accumulatedDragX += deltaX
+        accumulatedDragY += deltaY
+
+        // Обновляем визуальное положение точки на экране телефона
         val current = _uiState.value
-        val newX = (current.cursorX + deltaX * sensitivity).coerceIn(0f, 1920f)
-        val newY = (current.cursorY + deltaY * sensitivity).coerceIn(0f, 1080f)
+        val newX = (current.cursorX + deltaX * 2.5f).coerceIn(0f, 1920f)
+        val newY = (current.cursorY + deltaY * 2.5f).coerceIn(0f, 1080f)
         _uiState.value = current.copy(cursorX = newX, cursorY = newY)
+
+        // Мгновенная отправка шага на телевизор при движении пальца
+        if (accumulatedDragX > DRAG_THRESHOLD) {
+            accumulatedDragX = 0f
+            vibrate(15)
+            executeCommand("input keyevent 22") // Вправо
+        } else if (accumulatedDragX < -DRAG_THRESHOLD) {
+            accumulatedDragX = 0f
+            vibrate(15)
+            executeCommand("input keyevent 21") // Влево
+        }
+
+        if (accumulatedDragY > DRAG_THRESHOLD) {
+            accumulatedDragY = 0f
+            vibrate(15)
+            executeCommand("input keyevent 20") // Вниз
+        } else if (accumulatedDragY < -DRAG_THRESHOLD) {
+            accumulatedDragY = 0f
+            vibrate(15)
+            executeCommand("input keyevent 19") // Вверх
+        }
     }
 
-    // Двойное нажатие = клик в текущей позиции курсора
+    fun onTouchpadDragEnd() {
+        accumulatedDragX = 0f
+        accumulatedDragY = 0f
+    }
+
+    // Двойное нажатие = клик
     fun clickAtCursor() {
         vibrate(55)
         val x = _uiState.value.cursorX.toInt()
         val y = _uiState.value.cursorY.toInt()
-        executeCommand("input tap $x $y")
+        // Отправляем подтверждение выбора OK (66) и сенсорный клик (tap),
+        // чтобы гарантированно срабатывало в любом интерфейсе Станции
+        executeCommand("input keyevent 66; input tap $x $y")
+    }
+
+    // Прямой сенсорный свайп по экрану Станции
+    fun sendDirectSwipe(dx: Float, dy: Float) {
+        vibrate(30)
+        val startX = 960
+        val startY = 540
+        val endX = (960 + dx * 2).toInt().coerceIn(100, 1820)
+        val endY = (540 + dy * 2).toInt().coerceIn(100, 980)
+        executeCommand("input swipe $startX $startY $endX $endY 180")
     }
 
     // Прокрутка (свайп)

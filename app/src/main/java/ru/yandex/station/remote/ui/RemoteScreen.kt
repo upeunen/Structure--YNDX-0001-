@@ -243,7 +243,8 @@ fun RemoteScreen(
                     TouchpadPad(
                         cursorX = uiState.cursorX,
                         cursorY = uiState.cursorY,
-                        onMove = { dx, dy -> viewModel.moveCursor(dx, dy) },
+                        onMove = { dx, dy -> viewModel.onTouchpadDrag(dx, dy) },
+                        onDragEnd = { viewModel.onTouchpadDragEnd() },
                         onDoubleClick = { viewModel.clickAtCursor() },
                         onScrollUp = { viewModel.scroll(true) },
                         onScrollDown = { viewModel.scroll(false) }
@@ -734,6 +735,7 @@ fun TouchpadPad(
     cursorX: Float,
     cursorY: Float,
     onMove: (dx: Float, dy: Float) -> Unit,
+    onDragEnd: () -> Unit,
     onDoubleClick: () -> Unit,
     onScrollUp: () -> Unit,
     onScrollDown: () -> Unit
@@ -755,14 +757,21 @@ fun TouchpadPad(
                     detectTapGestures(
                         onDoubleTap = {
                             onDoubleClick()
+                        },
+                        onTap = {
+                            onDoubleClick()
                         }
                     )
                 }
                 .pointerInput(Unit) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        onMove(dragAmount.x, dragAmount.y)
-                    }
+                    detectDragGestures(
+                        onDragEnd = { onDragEnd() },
+                        onDragCancel = { onDragEnd() },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            onMove(dragAmount.x, dragAmount.y)
+                        }
+                    )
                 },
             contentAlignment = Alignment.Center
         ) {

@@ -300,6 +300,69 @@ class TorrServerClient(
         }
     }
 
+    data class ActiveTorrentStats(
+        val title: String,
+        val fileName: String,
+        val statString: String,
+        val downloadSpeedBytes: Long,
+        val activePeers: Int,
+        val totalPeers: Int,
+        val preloadedBytes: Long
+    )
+
+    suspend fun getActiveTorrentStats(): ActiveTorrentStats? = withContext(Dispatchers.IO) {
+        var conn: HttpURLConnection? = null
+        try {
+            val url = URL("$baseUrl/api/torrents")
+            conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 2000
+                readTimeout = 2000
+            }
+            if (conn.responseCode !in 200..299) return@withContext null
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            val torrents = JSONObject(body).optJSONArray("torrents") ?: return@withContext null
+
+            var workingObj: JSONObject? = null
+            for (i in 0 until torrents.length()) {
+                val t = torrents.getJSONObject(i)
+                val statStr = t.optString("stat_string")
+                if (statStr.equals("Torrent working", ignoreCase = true) || t.optInt("active_peers", 0) > 0) {
+                    workingObj = t
+                    break
+                }
+            }
+            val obj = workingObj ?: return@withContext null
+            val title = obj.optString("name").ifBlank { obj.optString("title") }
+            val viewedArr = obj.optJSONArray("viewed_files")
+            val activeFileIdx = if (viewedArr != null && viewedArr.length() > 0) viewedArr.optInt(0, -1) else -1
+            var fileName = title
+            val fileStats = obj.optJSONArray("file_stats")
+            if (fileStats != null && activeFileIdx >= 0) {
+                for (j in 0 until fileStats.length()) {
+                    val f = fileStats.getJSONObject(j)
+                    if (f.optInt("id", j) == activeFileIdx) {
+                        fileName = f.optString("name").ifBlank { f.optString("path").substringAfterLast('/') }
+                        break
+                    }
+                }
+            }
+            ActiveTorrentStats(
+                title = title,
+                fileName = fileName,
+                statString = obj.optString("stat_string"),
+                downloadSpeedBytes = obj.optLong("download_speed", 0L),
+                activePeers = obj.optInt("active_peers", 0),
+                totalPeers = obj.optInt("total_peers", 0),
+                preloadedBytes = obj.optLong("preloaded_bytes", 0L)
+            )
+        } catch (_: Exception) {
+            null
+        } finally {
+            try { conn?.disconnect() } catch (_: Exception) {}
+        }
+    }
+
     // Ожидание реального наполнения стартового буфера перед запуском видеоплеера
     suspend fun waitForBuffer(
         torrentHash: String,

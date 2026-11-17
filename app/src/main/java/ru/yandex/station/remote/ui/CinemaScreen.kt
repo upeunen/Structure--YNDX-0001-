@@ -332,6 +332,42 @@ fun CinemaScreen(
                 }
             }
 
+            // Живая строка активного файла с TorrServer на Станции
+            uiState.torrServerLiveStats?.let { stats ->
+                item {
+                    val speedText = if (stats.downloadSpeedBytes >= 1024L * 1024L) {
+                        String.format(java.util.Locale.US, "%.1f МБ/с", stats.downloadSpeedBytes / (1024.0 * 1024.0))
+                    } else {
+                        "${stats.downloadSpeedBytes / 1024L} КБ/с"
+                    }
+                    val bufMb = String.format(java.util.Locale.US, "%.1f МБ", stats.preloadedBytes / (1024.0 * 1024.0))
+                    Surface(
+                        color = Color(0xFF151C16),
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, StatusGreen.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = "⚡ В работе на Станции: ${stats.fileName}",
+                                color = StatusGreen,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = "Пиры: ${stats.activePeers}/${stats.totalPeers} • Скорость: $speedText • Буфер: $bufMb",
+                                color = TextSecondary,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
+            }
+
             // Панель логов работы с кнопкой копирования
             item {
                 var logsExpanded by remember { mutableStateOf(true) }

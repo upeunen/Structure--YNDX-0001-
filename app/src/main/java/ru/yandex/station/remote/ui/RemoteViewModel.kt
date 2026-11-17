@@ -59,6 +59,7 @@ data class RemoteUiState(
     val activePlaybackSec: Long = 0L,
     val pendingEpisodeSelection: PendingEpisodeSelection? = null,
     val pendingPeerRetry: PendingPeerRetry? = null,
+    val torrServerLiveStats: TorrServerClient.ActiveTorrentStats? = null,
     val debugLogs: List<String> = emptyList()
 )
 
@@ -133,16 +134,18 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         }
         var stillPlaying = _uiState.value.activeMoviePlaying
         if (stillPlaying != null) {
-            val psRes = adbClient.execute("ps | grep -iE \"fireplayer|brouken\"")
+            val psRes = adbClient.execute("ps | grep -iE \"vlc|fireplayer\"")
             val running = psRes.getOrNull().orEmpty()
-            if (psRes.isSuccess && !running.contains("fireplayer") && !running.contains("brouken")) {
+            if (psRes.isSuccess && !running.contains("vlc") && !running.contains("fireplayer")) {
                 stopPlaybackMonitor()
                 stillPlaying = null
             }
         }
+        val liveStats = torrServerClient.getActiveTorrentStats()
         _uiState.value = _uiState.value.copy(
             connectionStatus = StationConnectionStatus.CONNECTED,
-            activeMoviePlaying = stillPlaying
+            activeMoviePlaying = stillPlaying,
+            torrServerLiveStats = liveStats
         )
     }
 
@@ -954,15 +957,19 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 delay(5000)
                 if (!isPlaybackPaused) {
                     activePositionSec += 5L
-                    _uiState.value = _uiState.value.copy(activePlaybackSec = activePositionSec)
+                    val liveStats = torrServerClient.getActiveTorrentStats()
+                    _uiState.value = _uiState.value.copy(
+                        activePlaybackSec = activePositionSec,
+                        torrServerLiveStats = liveStats
+                    )
                     historyRepo.savePlaybackProgress(torrentHash, file.id, file.name, activePositionSec)
                 }
                 checks++
                 // Каждые 10 сек (после 30 сек просмотра) проверяем, не завершилась ли серия в плеере
                 if (checks % 2 == 0 && checks >= 6 && activeSeriesFiles.size > 1 && !isPlaybackPaused) {
-                    val psRes = adbClient.execute("ps | grep -iE \"fireplayer|brouken\"")
+                    val psRes = adbClient.execute("ps | grep -iE \"vlc|fireplayer\"")
                     val running = psRes.getOrNull().orEmpty()
-                    if (psRes.isSuccess && !running.contains("fireplayer") && !running.contains("brouken")) {
+                    if (psRes.isSuccess && !running.contains("vlc") && !running.contains("fireplayer")) {
                         addLog("Плеер завершил серию ${file.name}")
                         if (activeSeriesIndex + 1 < activeSeriesFiles.size) {
                             playNextEpisode()
@@ -1019,21 +1026,12 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         val savedPosSec = historyRepo.getFilePositionSec(torrentHash, file.id)
         val posExtra = if (savedPosSec > 15L) "--ei position ${savedPosSec * 1000L} " else ""
         val streamUrl = torrServerClient.getStreamUrl(torrentHash, file.id)
-        val isLegacyContainer = file.name.lowercase().let {
-            it.endsWith(".avi") || it.endsWith(".wmv") || it.endsWith(".flv") || it.endsWith(".vob")
-        }
-        // Для .avi/.wmv используем штатный fireplayer (ExoPlayer в Just Player не поддерживает старые AVI), для .mkv/.mp4 — Just Player (играет AC3/DTS)
-        val adbCmd = if (isLegacyContainer) {
-            "am force-stop org.smarttube.stable; am force-stop org.videolan.vlc; am force-stop com.brouken.player; am force-stop com.softwinner.fireplayer; " +
-                "(svc power stayon true; settings put secure screensaver_enabled 0; input keyevent 224) >/dev/null 2>&1 & " +
-                "am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" $posExtra"
-        } else {
-            "am force-stop org.smarttube.stable; am force-stop org.videolan.vlc; am force-stop com.brouken.player; am force-stop com.softwinner.fireplayer; " +
-                "(svc power stayon true; settings put secure screensaver_enabled 0; input keyevent 224) >/dev/null 2>&1 & " +
-                "if pm path com.brouken.player >/dev/null 2>&1; then " +
-                "am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" -p com.brouken.player; " +
-                "else am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" $posExtra; fi"
-        }
+        // Приоритетно запускаем VLC (поддерживает .mkv/.avi, AC3/DTS, аудиодорожки и субтитры), иначе резервный fireplayer
+        val adbCmd = "am force-stop org.smarttube.stable; am force-stop org.videolan.vlc; am force-stop com.brouken.player; am force-stop com.softwinner.fireplayer; " +
+            "(svc power stayon true; settings put secure screensaver_enabled 0; input keyevent 224) >/dev/null 2>&1 & " +
+            "if pm path org.videolan.vlc >/dev/null 2>&1; then " +
+            "am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" -p org.videolan.vlc $posExtra; " +
+            "else am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" $posExtra; fi"
         var adbResult = adbClient.execute(adbCmd)
 
         if (!adbResult.isSuccess) {

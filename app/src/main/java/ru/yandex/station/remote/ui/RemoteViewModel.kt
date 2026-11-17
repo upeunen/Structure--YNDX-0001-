@@ -133,9 +133,9 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         }
         var stillPlaying = _uiState.value.activeMoviePlaying
         if (stillPlaying != null) {
-            val psRes = adbClient.execute("ps | grep -iE \"fireplayer|vlc\"")
+            val psRes = adbClient.execute("ps | grep -iE \"fireplayer|brouken\"")
             val running = psRes.getOrNull().orEmpty()
-            if (psRes.isSuccess && !running.contains("fireplayer") && !running.contains("vlc")) {
+            if (psRes.isSuccess && !running.contains("fireplayer") && !running.contains("brouken")) {
                 stopPlaybackMonitor()
                 stillPlaying = null
             }
@@ -403,10 +403,18 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         executeCommand("input keyevent 164")
     }
 
+    fun tapOnTvScreen(normX: Float, normY: Float) {
+        vibrate(35)
+        cancelYouTubeAutoHide()
+        val x = (normX.coerceIn(0f, 1f) * 1920f).toInt()
+        val y = (normY.coerceIn(0f, 1f) * 1080f).toInt()
+        executeCommand("input tap $x $y")
+    }
+
     fun launchYouTube() {
         vibrate(50)
         stopPlaybackMonitor()
-        executeCommand("am force-stop com.softwinner.fireplayer; am force-stop org.videolan.vlc; svc power stayon true; input keyevent 224; am start -n org.smarttube.stable/com.liskovsoft.smartyoutubetv2.tv.ui.main.SplashActivity")
+        executeCommand("am force-stop com.softwinner.fireplayer; am force-stop com.brouken.player; am force-stop org.videolan.vlc; svc power stayon true; input keyevent 224; am start -n org.smarttube.stable/com.liskovsoft.smartyoutubetv2.tv.ui.main.SplashActivity")
     }
 
     fun launchAlice() {
@@ -414,7 +422,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         stopPlaybackMonitor()
         _uiState.value = _uiState.value.copy(activeMoviePlaying = null, lastMessage = "Остановлено: экран Алисы включен")
         viewModelScope.launch {
-            val cmd = "am force-stop com.softwinner.fireplayer; am force-stop org.videolan.vlc; am force-stop org.smarttube.stable; am force-stop org.schabi.newpipe; am force-stop top.rootu.lampa; input keyevent 86; input keyevent 3; am start -a android.intent.action.MAIN -c android.intent.category.HOME"
+            val cmd = "am force-stop com.softwinner.fireplayer; am force-stop com.brouken.player; am force-stop org.videolan.vlc; am force-stop org.smarttube.stable; am force-stop org.schabi.newpipe; am force-stop top.rootu.lampa; input keyevent 86; input keyevent 3; am start -a android.intent.action.MAIN -c android.intent.category.HOME"
             val result = adbClient.execute(cmd)
             if (result.isSuccess) {
                 _uiState.value = _uiState.value.copy(connectionStatus = StationConnectionStatus.CONNECTED)
@@ -952,9 +960,9 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 checks++
                 // Каждые 10 сек (после 30 сек просмотра) проверяем, не завершилась ли серия в плеере
                 if (checks % 2 == 0 && checks >= 6 && activeSeriesFiles.size > 1 && !isPlaybackPaused) {
-                    val psRes = adbClient.execute("ps | grep -iE \"fireplayer|vlc\"")
+                    val psRes = adbClient.execute("ps | grep -iE \"fireplayer|brouken\"")
                     val running = psRes.getOrNull().orEmpty()
-                    if (psRes.isSuccess && !running.contains("fireplayer") && !running.contains("vlc")) {
+                    if (psRes.isSuccess && !running.contains("fireplayer") && !running.contains("brouken")) {
                         addLog("Плеер завершил серию ${file.name}")
                         if (activeSeriesIndex + 1 < activeSeriesFiles.size) {
                             playNextEpisode()
@@ -1011,10 +1019,12 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         val savedPosSec = historyRepo.getFilePositionSec(torrentHash, file.id)
         val posExtra = if (savedPosSec > 15L) "--ei position ${savedPosSec * 1000L} " else ""
         val streamUrl = torrServerClient.getStreamUrl(torrentHash, file.id)
-        // Запускаем штатный аппаратный плеер Станции (VLC падает с 404 на HEAD-запрос TorrServer Silo.2)
-        val adbCmd = "am force-stop org.smarttube.stable; am force-stop org.videolan.vlc; am force-stop com.softwinner.fireplayer; " +
+        // Запускаем Just Player (ExoPlayer + FFmpeg: играет любой звук AC3/DTS и не делает HEAD-запросов), иначе штатный fireplayer
+        val adbCmd = "am force-stop org.smarttube.stable; am force-stop org.videolan.vlc; am force-stop com.brouken.player; am force-stop com.softwinner.fireplayer; " +
             "(svc power stayon true; settings put secure screensaver_enabled 0; input keyevent 224) >/dev/null 2>&1 & " +
-            "am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" $posExtra"
+            "if pm path com.brouken.player >/dev/null 2>&1; then " +
+            "am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" -p com.brouken.player; " +
+            "else am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" $posExtra; fi"
         var adbResult = adbClient.execute(adbCmd)
 
         if (!adbResult.isSuccess) {

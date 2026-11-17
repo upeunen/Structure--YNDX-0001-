@@ -214,7 +214,72 @@ fun RemoteScreen(
                 onSubtitles = { viewModel.sendKeyEvent(50) }
             )
 
+            // Простой экранный тачпад: нажатие в любую точку пропорционально нажимает на экран ТВ (1920x1080)
+            TvTapAreaCard(
+                onTapNormalized = { nx, ny -> viewModel.tapOnTvScreen(nx, ny) }
+            )
+
             Spacer(modifier = Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+fun TvTapAreaCard(
+    onTapNormalized: (Float, Float) -> Unit
+) {
+    var lastTap by remember { mutableStateOf<Offset?>(null) }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "ТАП ПО ЭКРАНУ ТВ (НАЖМИТЕ В НУЖНОЕ МЕСТО)",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextSecondary,
+                letterSpacing = 0.8.sp
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF101014))
+                    .border(1.dp, DarkSurfaceElevated, RoundedCornerShape(12.dp))
+                    .pointerInput(Unit) {
+                        detectTapGestures { offset ->
+                            val nx = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                            val ny = (offset.y / size.height.toFloat()).coerceIn(0f, 1f)
+                            lastTap = Offset(nx, ny)
+                            onTapNormalized(nx, ny)
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val grid = Color(0xFF222228)
+                    drawLine(grid, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), strokeWidth = 1f)
+                    drawLine(grid, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = 1f)
+                    lastTap?.let { pt ->
+                        val cx = pt.x * size.width
+                        val cy = pt.y * size.height
+                        drawCircle(AccentYandex.copy(alpha = 0.3f), radius = 20f, center = Offset(cx, cy))
+                        drawCircle(AccentYandex, radius = 6f, center = Offset(cx, cy))
+                    }
+                }
+                Text(
+                    text = "Экран ТВ 16:9",
+                    color = TextSecondary.copy(alpha = 0.45f),
+                    fontSize = 12.sp
+                )
+            }
         }
     }
 }

@@ -102,10 +102,45 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         checkConnection()
+        startConnectionHeartbeat()
         viewModelScope.launch {
             ensureTorrServerRunning(notifyIfStarted = false)
         }
         resolveOldYouTubeHistoryTitles()
+    }
+
+    private fun startConnectionHeartbeat() {
+        viewModelScope.launch {
+            while (true) {
+                delay(30000L)
+                refreshStationState()
+            }
+        }
+    }
+
+    private suspend fun refreshStationState() {
+        val isOk = adbClient.testConnection()
+        if (!isOk) {
+            stopPlaybackMonitor()
+            _uiState.value = _uiState.value.copy(
+                connectionStatus = StationConnectionStatus.UNAVAILABLE,
+                activeMoviePlaying = null
+            )
+            return
+        }
+        var stillPlaying = _uiState.value.activeMoviePlaying
+        if (stillPlaying != null) {
+            val psRes = adbClient.execute("ps | grep -iE \"fireplayer|vlc\"")
+            val running = psRes.getOrNull().orEmpty()
+            if (psRes.isSuccess && !running.contains("fireplayer") && !running.contains("vlc")) {
+                stopPlaybackMonitor()
+                stillPlaying = null
+            }
+        }
+        _uiState.value = _uiState.value.copy(
+            connectionStatus = StationConnectionStatus.CONNECTED,
+            activeMoviePlaying = stillPlaying
+        )
     }
 
     fun setAppScreen(screen: AppScreen) {
@@ -240,10 +275,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     fun checkConnection() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(connectionStatus = StationConnectionStatus.CHECKING)
-            val isOk = adbClient.testConnection()
-            _uiState.value = _uiState.value.copy(
-                connectionStatus = if (isOk) StationConnectionStatus.CONNECTED else StationConnectionStatus.UNAVAILABLE
-            )
+            refreshStationState()
         }
     }
 

@@ -72,7 +72,9 @@ fun RemoteScreen(
                 )
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(top = 2.dp)
+                    modifier = Modifier
+                        .clickable { viewModel.checkConnection() }
+                        .padding(top = 2.dp, end = 8.dp, bottom = 2.dp)
                 ) {
                     val (dotColor, statusText) = when (uiState.connectionStatus) {
                         StationConnectionStatus.CONNECTED -> StatusGreen to "На связи (${uiState.ip})"

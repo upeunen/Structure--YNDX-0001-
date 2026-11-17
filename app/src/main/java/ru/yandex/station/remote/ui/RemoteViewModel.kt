@@ -101,6 +101,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     private var isPlaybackPaused: Boolean = false
     private var playbackMonitorJob: kotlinx.coroutines.Job? = null
     private var youtubeAutoHideJob: kotlinx.coroutines.Job? = null
+    private var seekJob: kotlinx.coroutines.Job? = null
 
     init {
         checkConnection()
@@ -368,12 +369,11 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         activePositionSec = (activePositionSec + deltaSec).coerceAtLeast(0L)
         _uiState.value = _uiState.value.copy(activePlaybackSec = activePositionSec)
         val keyCode = if (deltaSec >= 0) 22 else 21
-        val steps = (kotlin.math.abs(deltaSec) / 10L).coerceIn(1L, 6L).toInt()
-        viewModelScope.launch {
-            for (i in 1..steps) {
-                adbClient.execute("input keyevent $keyCode")
-                if (i < steps) delay(150)
-            }
+        val count = if (kotlin.math.abs(deltaSec) >= 60L) 3 else 1
+        val cmd = (1..count).joinToString("; ") { "input keyevent $keyCode" }
+        seekJob?.cancel()
+        seekJob = viewModelScope.launch {
+            adbClient.execute(cmd)
         }
     }
 

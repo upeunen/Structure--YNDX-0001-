@@ -10,6 +10,9 @@ class RemotePreferences(context: Context) {
     companion object {
         private const val KEY_IP = "station_ip"
         private const val KEY_PORT = "station_port"
+        private const val KEY_RUTRACKER_LOGIN = "rutracker_login"
+        private const val KEY_RUTRACKER_PASS = "rutracker_pass"
+
         const val DEFAULT_IP = "192.168.100.6"
         const val DEFAULT_PORT = 5555
     }
@@ -21,4 +24,12 @@ class RemotePreferences(context: Context) {
     var port: Int
         get() = prefs.getInt(KEY_PORT, DEFAULT_PORT)
         set(value) = prefs.edit().putInt(KEY_PORT, value).apply()
+
+    var rutrackerLogin: String
+        get() = prefs.getString(KEY_RUTRACKER_LOGIN, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_RUTRACKER_LOGIN, value).apply()
+
+    var rutrackerPassword: String
+        get() = prefs.getString(KEY_RUTRACKER_PASS, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_RUTRACKER_PASS, value).apply()
 }

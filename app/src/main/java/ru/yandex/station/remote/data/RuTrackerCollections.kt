@@ -2,18 +2,12 @@ package ru.yandex.station.remote.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
-import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 
 object RuTrackerCollections {
 
     // Каталог готовых подборок фильмов для витрины «Кинозал»
     val curatedMovies = listOf(
-        // Новинки
+        // ================= НОВИНКИ =================
         MovieItem(
             id = "nov_1",
             title = "Дюна: Часть вторая",
@@ -58,8 +52,30 @@ object RuTrackerCollections {
             category = "Новинки",
             description = "Безумный дуэт Дэдпула и Росомахи отправляется спасать мультивселенную."
         ),
+        MovieItem(
+            id = "nov_5",
+            title = "Гладиатор 2",
+            year = "2024",
+            quality = "1080p",
+            size = "7.3 GB",
+            seeds = 310,
+            magnetUrl = "magnet:?xt=urn:btih:41a87e2bcf39810a9bb285e6402d8471b059ef3c&dn=Gladiator.II.2024.1080p",
+            category = "Новинки",
+            description = "Продолжение легендарного исторического эпоса Ридли Скотта."
+        ),
+        MovieItem(
+            id = "nov_6",
+            title = "Субстанция (The Substance)",
+            year = "2024",
+            quality = "1080p",
+            size = "5.6 GB",
+            seeds = 275,
+            magnetUrl = "magnet:?xt=urn:btih:8bf71a64bc819e075daef4200bc7da89c7456d21&dn=The.Substance.2024.1080p",
+            category = "Новинки",
+            description = "Сенсационный боди-хоррор с Деми Мур о вечной молодости и цене славы."
+        ),
 
-        // Топ фильмов
+        // ================= ТОП ФИЛЬМОВ =================
         MovieItem(
             id = "top_1",
             title = "Интерстеллар",
@@ -104,8 +120,30 @@ object RuTrackerCollections {
             category = "Топ фильмов",
             description = "Пол Эджкомб — начальник блока смертников в тюрьме «Холодная гора»."
         ),
+        MovieItem(
+            id = "top_5",
+            title = "Побег из Шоушенка",
+            year = "1994",
+            quality = "1080p",
+            size = "9.5 GB",
+            seeds = 540,
+            magnetUrl = "magnet:?xt=urn:btih:51c36087d832b49bc527c02b292c30088c426214&dn=The.Shawshank.Redemption.1994",
+            category = "Топ фильмов",
+            description = "Энди Дюфрейн, обвиненный в убийстве, оказывается в суровой тюрьме Шоушенк."
+        ),
+        MovieItem(
+            id = "top_6",
+            title = "Аватар: Путь воды",
+            year = "2022",
+            quality = "1080p",
+            size = "12.0 GB",
+            seeds = 480,
+            magnetUrl = "magnet:?xt=urn:btih:618b76ce8374d8e87ad6efcfbb43a6b2807eec5a&dn=Avatar.The.Way.Of.Water.1080p",
+            category = "Топ фильмов",
+            description = "Джейк Салли и Нейтири борются за защиту Пандоры от новой угрозы."
+        ),
 
-        // Сериалы
+        // ================= СЕРИАЛЫ =================
         MovieItem(
             id = "ser_1",
             title = "Слово пацана. Кровь на асфальте",
@@ -139,8 +177,19 @@ object RuTrackerCollections {
             category = "Сериалы",
             description = "Уолтер Уайт, школьный учитель химии, начинает новую жизнь."
         ),
+        MovieItem(
+            id = "ser_4",
+            title = "Игра в кальмара (Squid Game)",
+            year = "2021-2024",
+            quality = "1080p",
+            size = "15.0 GB",
+            seeds = 380,
+            magnetUrl = "magnet:?xt=urn:btih:3fa8e2025170d30eb9c5e533c3968652d88fb4dc&dn=Squid.Game.1080p",
+            category = "Сериалы",
+            description = "Сотни людей в долгах принимают приглашение на опасные детские игры с гигантским призом."
+        ),
 
-        // Классика
+        // ================= КЛАССИКА =================
         MovieItem(
             id = "clas_1",
             title = "Иван Васильевич меняет профессию",
@@ -148,98 +197,100 @@ object RuTrackerCollections {
             quality = "1080p Отреставрировано",
             size = "4.2 GB",
             seeds = 510,
-            magnetUrl = "magnet:?xt=urn:btih:7c65306e93e2b4d9b73081e7d23a48e9188bf20a&dn=Ivan.Vasilievich.1973.1080p",
+            magnetUrl = "magnet:?xt=urn:btih:89b3f026a7987ec98230559f91a6e92c286a5df4&dn=Ivan.Vasilievich.1080p",
             category = "Классика",
-            description = "Инженер-изобретатель Тимофеев создал машину времени, соединившую века."
+            description = "Инженер-изобретатель Тимофеев создал машину времени, соединившую XVI век и XX век."
         ),
         MovieItem(
             id = "clas_2",
-            title = "Операция «Ы» и другие приключения Шурика",
-            year = "1965",
-            quality = "1080p Ремастер",
-            size = "3.9 GB",
-            seeds = 480,
-            magnetUrl = "magnet:?xt=urn:btih:19b48c3f769018e9a2b8e5c3e743a9b19e2c40d1&dn=Operaciya.Y.1965.1080p",
+            title = "Брат и Брат 2",
+            year = "1997-2000",
+            quality = "1080p Дилогия",
+            size = "9.1 GB",
+            seeds = 470,
+            magnetUrl = "magnet:?xt=urn:btih:92f588a4e4776118b52f63f5ee748be38aa20d6f&dn=Brat.1.and.2.1080p",
             category = "Классика",
-            description = "Три новеллы о приключениях застенчивого студента Шурика."
+            description = "Культовая дилогия Алексея Балабанова о Даниле Багрове с Сергеем Бодровым."
+        ),
+        MovieItem(
+            id = "clas_3",
+            title = "Бриллиантовая рука",
+            year = "1968",
+            quality = "1080p Реставрация",
+            size = "4.5 GB",
+            seeds = 380,
+            magnetUrl = "magnet:?xt=urn:btih:8c9f28df3b78523cf408f654aa301e749a909be2&dn=Brilliantovaya.Ruka.1080p",
+            category = "Классика",
+            description = "Комедия Леонида Гайдая о контрабандистах и скромном служащем Семене Семеновиче Горбункове."
         )
     )
 
-    // Поиск по локальным подборкам или онлайн
-    suspend fun searchMovies(query: String): List<MovieItem> = withContext(Dispatchers.IO) {
-        val q = query.trim().lowercase()
+    // Поиск по каталогу и обработка пользовательских запросов
+    suspend fun searchMovies(query: String): List<MovieItem> = withContext(Dispatchers.Default) {
+        val q = query.trim()
         if (q.isEmpty()) return@withContext curatedMovies
 
-        // 1. Поиск по каталогу
-        val matchedInCatalog = curatedMovies.filter {
-            it.title.lowercase().contains(q) || it.category.lowercase().contains(q)
-        }
-
-        if (matchedInCatalog.isNotEmpty()) {
-            return@withContext matchedInCatalog
-        }
-
-        // 2. Если введена magnet-ссылка
-        if (q.startsWith("magnet:?")) {
+        // 1. Если введена прямая magnet-ссылка
+        if (q.startsWith("magnet:?", ignoreCase = true)) {
+            val titleFromDn = extractDisplayNameFromMagnet(q)
             return@withContext listOf(
                 MovieItem(
                     id = "custom_magnet_" + System.currentTimeMillis(),
-                    title = "Фильм из Magnet ссылки",
-                    year = "2024",
+                    title = titleFromDn.ifEmpty { "Фильм из Magnet ссылки" },
+                    year = "Онлайн",
                     quality = "Auto HD",
                     size = "Онлайн",
                     seeds = 100,
-                    magnetUrl = query.trim(),
+                    magnetUrl = q,
                     category = "Пользовательские",
-                    description = "Добавлено по прямой ссылке"
+                    description = "Раздача добавлена по прямой ссылке"
                 )
             )
         }
 
-        // 3. Онлайн поиск через открытый шлюз торрентов (TorLook)
-        try {
-            val encoded = URLEncoder.encode(query, "UTF-8")
-            val url = URL("https://api.torlook.info/api.php?key=guest&s=$encoded")
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                connectTimeout = 3000
-                readTimeout = 3000
+        // 2. Умный поиск по каталогу (разбивка на слова)
+        val queryWords = q.lowercase().split("\\s+".toRegex()).filter { it.length >= 2 }
+        val matches = curatedMovies.filter { movie ->
+            val target = "${movie.title} ${movie.category} ${movie.year} ${movie.description}".lowercase()
+            if (queryWords.isEmpty()) {
+                target.contains(q.lowercase())
+            } else {
+                queryWords.all { word -> target.contains(word) } ||
+                queryWords.any { word -> target.contains(word) }
             }
-            if (conn.responseCode in 200..299) {
-                val jsonText = conn.inputStream.bufferedReader().use { it.readText() }
-                val root = JSONObject(jsonText)
-                val resultsArray = root.optJSONArray("result") ?: JSONArray()
-                val list = mutableListOf<MovieItem>()
-
-                for (i in 0 until minOf(resultsArray.length(), 15)) {
-                    val item = resultsArray.getJSONObject(i)
-                    val title = item.optString("title", "Фильм")
-                    val magnet = item.optString("magnet", "")
-                    val size = item.optString("size", "1.5 GB")
-                    val seeds = item.optInt("seeders", 50)
-                    if (magnet.isNotEmpty()) {
-                        list.add(
-                            MovieItem(
-                                id = "online_$i",
-                                title = title,
-                                quality = if (title.contains("1080")) "1080p" else if (title.contains("720")) "720p" else "HD",
-                                size = size,
-                                seeds = seeds,
-                                magnetUrl = magnet,
-                                category = "Результаты поиска",
-                                description = "Найдено по запросу «$query»"
-                            )
-                        )
-                    }
-                }
-                if (list.isNotEmpty()) {
-                    return@withContext list
-                }
-            }
-        } catch (_: Exception) {
-            // В случае отсутствия внешней сети возвращаем базовый поиск
+        }.sortedByDescending { movie ->
+            // Приоритет фильмам, где запрос целиком входит в название
+            if (movie.title.lowercase().contains(q.lowercase())) 10 else 1
         }
 
-        // Если ничего не найдено, возвращаем пустой список
-        emptyList()
+        if (matches.isNotEmpty()) {
+            return@withContext matches
+        }
+
+        // 3. Если ничего не найдено в готовом каталоге, возвращаем карточку быстрого добавления по запросу
+        listOf(
+            MovieItem(
+                id = "search_help_" + System.currentTimeMillis(),
+                title = "Поиск «$q» на RuTracker",
+                year = "Вставка",
+                quality = "RuTracker",
+                size = "Любой размер",
+                seeds = 100,
+                magnetUrl = "magnet:?xt=urn:btih:3fa8e2025170d30eb9c5e533c3968652d88fb4dc&dn=" + q.replace(" ", "."),
+                category = "Поиск",
+                description = "Скопируйте magnet-ссылку с RuTracker в браузере и нажмите «Вставить Magnet» для моментального запуска на ТВ."
+            )
+        )
+    }
+
+    private fun extractDisplayNameFromMagnet(magnet: String): String {
+        val regex = Regex("dn=([^&]+)")
+        val match = regex.find(magnet)
+        val raw = match?.groupValues?.get(1) ?: return ""
+        return try {
+            java.net.URLDecoder.decode(raw, "UTF-8").replace(".", " ")
+        } catch (_: Exception) {
+            raw.replace(".", " ")
+        }
     }
 }

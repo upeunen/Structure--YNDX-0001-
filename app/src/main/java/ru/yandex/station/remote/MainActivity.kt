@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -66,6 +67,25 @@ class MainActivity : ComponentActivity() {
                             )
 
                             NavigationBarItem(
+                                selected = uiState.activeAppScreen == AppScreen.YOUTUBE,
+                                onClick = { viewModel.setAppScreen(AppScreen.YOUTUBE) },
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayCircle,
+                                        contentDescription = "YouTube"
+                                    )
+                                },
+                                label = { Text("YouTube") },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = AccentRed,
+                                    unselectedIconColor = TextSecondary,
+                                    selectedTextColor = AccentRed,
+                                    unselectedTextColor = TextSecondary,
+                                    indicatorColor = DarkSurfaceElevated
+                                )
+                            )
+
+                            NavigationBarItem(
                                 selected = uiState.activeAppScreen == AppScreen.CINEMA,
                                 onClick = { viewModel.setAppScreen(AppScreen.CINEMA) },
                                 icon = {
@@ -96,6 +116,13 @@ class MainActivity : ComponentActivity() {
                                 RemoteScreen(
                                     viewModel = viewModel,
                                     onOpenSettings = { showSettings = true }
+                                )
+                            }
+                            AppScreen.YOUTUBE -> {
+                                YouTubeScreen(
+                                    viewModel = viewModel,
+                                    onOpenSettings = { showSettings = true },
+                                    onBackToRemote = { viewModel.setAppScreen(AppScreen.REMOTE) }
                                 )
                             }
                             AppScreen.CINEMA -> {
@@ -150,18 +177,19 @@ class MainActivity : ComponentActivity() {
                         }
                         viewModel.playMagnetUrl(magnet)
                     } else {
-                        viewModel.sendYouTubeUrl(sharedText) { success ->
+                        viewModel.setAppScreen(AppScreen.YOUTUBE)
+                        viewModel.launchYouTubeInput(sharedText) { success ->
                             runOnUiThread {
                                 if (success) {
                                     Toast.makeText(
                                         applicationContext,
-                                        "Видео отправлено на телевизор",
+                                        "Запущено на Станции",
                                         Toast.LENGTH_LONG
                                     ).show()
                                 } else {
                                     Toast.makeText(
                                         applicationContext,
-                                        "Не удалось отправить видео на Станцию",
+                                        "Не удалось отправить на Станцию",
                                         Toast.LENGTH_LONG
                                     ).show()
                                 }

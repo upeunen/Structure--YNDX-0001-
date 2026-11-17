@@ -206,7 +206,7 @@ fun RemoteScreen(
                             icon = Icons.Default.PlayCircle,
                             accentColor = AccentRed,
                             modifier = Modifier.weight(1f),
-                            onClick = { viewModel.launchYouTube() }
+                            onClick = { viewModel.setAppScreen(AppScreen.YOUTUBE) }
                         )
                         QuickModeButton(
                             title = "🎬 Кинозал",

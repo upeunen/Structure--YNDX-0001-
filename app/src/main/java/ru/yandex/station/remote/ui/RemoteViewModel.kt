@@ -25,6 +25,7 @@ enum class StationConnectionStatus {
 
 enum class AppScreen {
     REMOTE,
+    YOUTUBE,
     CINEMA
 }
 
@@ -40,7 +41,6 @@ data class RemoteUiState(
     val torrServerPort: Int = 8090,
     val connectionStatus: StationConnectionStatus = StationConnectionStatus.IDLE,
     val lastMessage: String? = null,
-    val youtubeUrlInput: String = "",
     val activeAppScreen: AppScreen = AppScreen.REMOTE,
     val activeTab: RemoteTab = RemoteTab.REMOTE,
     val cursorX: Float = 960f,
@@ -48,6 +48,9 @@ data class RemoteUiState(
     val keyboardInput: String = "",
     val rutrackerLogin: String = "",
     val rutrackerPass: String = "",
+    // Раздел «YouTube»
+    val youtubeUrlInput: String = "",
+    val youtubeHistory: List<YouTubeItem> = emptyList(),
     // Раздел «Кинозал»
     val cinemaSearchQuery: String = "",
     val selectedCinemaCategory: String = "Новинки",
@@ -59,13 +62,15 @@ data class RemoteUiState(
 class RemoteViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = RemotePreferences(application)
     private val historyRepo = HistoryRepository(application)
+    private val youtubeHistoryRepo = YouTubeHistoryRepository(application)
 
     private val _uiState = MutableStateFlow(
         RemoteUiState(
             ip = prefs.ip,
             port = prefs.port,
             rutrackerLogin = prefs.rutrackerLogin,
-            rutrackerPass = prefs.rutrackerPassword
+            rutrackerPass = prefs.rutrackerPassword,
+            youtubeHistory = youtubeHistoryRepo.getHistory()
         )
     )
     val uiState: StateFlow<RemoteUiState> = _uiState.asStateFlow()
@@ -165,7 +170,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         executeCommand("input text \"$escaped\"")
     }
 
-    // Авто-ввод логина и пароля для RuTracker:
+    // Авто-ввод логина и пароля для RuTracker
     fun autoFillRuTracker(login: String, pass: String) {
         vibrate(50)
         viewModelScope.launch {
@@ -222,10 +227,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
     fun launchAlice() {
         vibrate(50)
-        // 1) Закрываем сторонние плееры
-        // 2) Посылаем системную кнопку HOME (keyevent 3) для возврата лаунчера с часами
-        // 3) Запускаем родное приложение Яндекс.Станции Quasar
-        executeCommand("am force-stop org.smarttube.stable; am force-stop com.softwinner.fireplayer; am force-stop org.xbmc.kodi; input keyevent 3; monkey -p ru.yandex.quasar.app -c android.intent.category.LAUNCHER 1; am start -a android.intent.action.MAIN -c android.intent.category.HOME")
+        executeCommand("am force-stop org.smarttube.stable; am force-stop com.softwinner.fireplayer; input keyevent 3; monkey -p ru.yandex.quasar.app -c android.intent.category.LAUNCHER 1; am start -a android.intent.action.MAIN -c android.intent.category.HOME")
     }
 
     // Управление мышью / сенсорной площадкой
@@ -268,7 +270,6 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         accumulatedDragY = 0f
     }
 
-    // Двойное нажатие = клик
     fun clickAtCursor() {
         vibrate(55)
         val x = _uiState.value.cursorX.toInt()
@@ -286,32 +287,70 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun sendYouTubeUrl(rawUrl: String, onComplete: ((Boolean) -> Unit)? = null) {
+    // ==========================================
+    // ЛОГИКА РАЗДЕЛА «YOUTUBE»
+    // ==========================================
+
+    fun launchYouTubeInput(rawInput: String, onComplete: ((Boolean) -> Unit)? = null) {
         vibrate(50)
-        val extractedUrl = extractUrl(rawUrl)
-        if (extractedUrl.isBlank()) {
-            _uiState.value = _uiState.value.copy(lastMessage = "Ссылка не найдена")
+        val text = rawInput.trim()
+        if (text.isEmpty()) {
+            _uiState.value = _uiState.value.copy(lastMessage = "Введите запрос или ссылку")
             onComplete?.invoke(false)
             return
         }
 
-        val cmd = "am start -a android.intent.action.VIEW -d \"$extractedUrl\" -p org.smarttube.stable"
+        val isUrl = text.contains("http://") || text.contains("https://") || text.contains("youtu.be") || text.contains("youtube.com")
+        val cmd: String
+        val historyItem: YouTubeItem
+
+        if (isUrl) {
+            val extractedUrl = extractUrl(text).ifEmpty { text }
+            cmd = "am start -a android.intent.action.VIEW -d \"$extractedUrl\" -p org.smarttube.stable"
+            historyItem = YouTubeItem(
+                id = "yt_" + System.currentTimeMillis(),
+                title = extractedUrl,
+                urlOrQuery = extractedUrl,
+                isUrl = true
+            )
+        } else {
+            val escaped = text.replace("\"", "\\\"")
+            cmd = "am start -a android.intent.action.SEARCH -q \"$escaped\" -p org.smarttube.stable"
+            historyItem = YouTubeItem(
+                id = "yt_" + System.currentTimeMillis(),
+                title = text,
+                urlOrQuery = text,
+                isUrl = false
+            )
+        }
+
         viewModelScope.launch {
             val result = adbClient.execute(cmd)
             if (result.isSuccess) {
+                youtubeHistoryRepo.addToHistory(historyItem)
                 _uiState.value = _uiState.value.copy(
                     connectionStatus = StationConnectionStatus.CONNECTED,
-                    lastMessage = "Видео отправлено на телевизор"
+                    youtubeUrlInput = "",
+                    youtubeHistory = youtubeHistoryRepo.getHistory(),
+                    lastMessage = if (isUrl) "Видео отправлено на телевизор" else "Поиск «$text» запущен на ТВ"
                 )
                 onComplete?.invoke(true)
             } else {
                 _uiState.value = _uiState.value.copy(
                     connectionStatus = StationConnectionStatus.UNAVAILABLE,
-                    lastMessage = "Ошибка подключения: ${result.exceptionOrNull()?.message}"
+                    lastMessage = "Ошибка отправки на Станцию: ${result.exceptionOrNull()?.message}"
                 )
                 onComplete?.invoke(false)
             }
         }
+    }
+
+    fun launchYouTubeHistoryItem(item: YouTubeItem) {
+        launchYouTubeInput(item.urlOrQuery)
+    }
+
+    fun sendYouTubeUrl(rawUrl: String, onComplete: ((Boolean) -> Unit)? = null) {
+        launchYouTubeInput(rawUrl, onComplete)
     }
 
     // ==========================================
@@ -348,13 +387,12 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             val results = RuTrackerCollections.searchMovies(query)
             _uiState.value = _uiState.value.copy(
                 cinemaMovies = results,
-                isCinemaLoading = false,
-                selectedCinemaCategory = if (query.isBlank()) "Новинки" else "Поиск"
+                isCinemaLoading = false
             )
         }
     }
 
-    // Запуск фильма на Станции через TorrServer и ADB
+    // Запуск фильма на Станции через TorrServer Silo и ADB
     fun playMovieOnStation(movie: MovieItem) {
         vibrate(60)
         viewModelScope.launch {
@@ -364,22 +402,22 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             )
             historyRepo.addToHistory(movie)
 
-            // 1. Отправляем в TorrServer на Станции
+            // 1. Отправляем в TorrServer Silo на Станции
             val addResult = torrServerClient.addTorrent(movie.magnetUrl, movie.title)
             val torrentHash = addResult.getOrNull()
 
             if (torrentHash.isNullOrBlank()) {
                 _uiState.value = _uiState.value.copy(
                     isCinemaLoading = false,
-                    lastMessage = "Ошибка добавления в TorrServer: ${addResult.exceptionOrNull()?.message}"
+                    lastMessage = "Ошибка TorrServer: ${addResult.exceptionOrNull()?.message}"
                 )
                 return@launch
             }
 
-            // 2. Формируем локальный поток для плеера Станции
-            val streamUrl = "http://127.0.0.1:8090/stream?link=$torrentHash"
+            // 2. Формируем локальный видеопоток для плеера Станции
+            val streamUrl = torrServerClient.getStreamUrl(torrentHash, 0)
 
-            // 3. Останавливаем YouTube и разворачиваем встроенный плеер на ТВ
+            // 3. Сворачиваем YouTube и разворачиваем встроенный видеоплеер
             val adbCmd = "am force-stop org.smarttube.stable; am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\""
             val adbResult = adbClient.execute(adbCmd)
 
@@ -413,7 +451,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         playMovieOnStation(movie)
     }
 
-    // Загрузка .torrent файла со смартфона на Станцию
+    // Загрузка .torrent файла со смартфона на Станцию в TorrServer Silo
     fun uploadTorrentFileAndPlay(fileBytes: ByteArray, fileName: String) {
         vibrate(50)
         setAppScreen(AppScreen.CINEMA)
@@ -440,13 +478,13 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 quality = "HD",
                 size = "Файл",
                 seeds = 100,
-                magnetUrl = "http://127.0.0.1:8090/stream?link=$torrentHash",
+                magnetUrl = torrServerClient.getStreamUrl(torrentHash, 0),
                 category = "Загруженные",
                 description = "Загружено из файла $fileName"
             )
             historyRepo.addToHistory(movie)
 
-            val streamUrl = "http://127.0.0.1:8090/stream?link=$torrentHash"
+            val streamUrl = torrServerClient.getStreamUrl(torrentHash, 0)
             val adbCmd = "am force-stop org.smarttube.stable; am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\""
             val adbResult = adbClient.execute(adbCmd)
 
@@ -459,7 +497,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             } else {
                 _uiState.value = _uiState.value.copy(
                     isCinemaLoading = false,
-                    lastMessage = "Ошибка запуска плеера через ADB: ${adbResult.exceptionOrNull()?.message}"
+                    lastMessage = "Ошибка запуска плеера: ${adbResult.exceptionOrNull()?.message}"
                 )
             }
         }
@@ -471,21 +509,16 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.value = _uiState.value.copy(
             lastMessage = if (isFav) "Добавлено в закладки" else "Удалено из закладок"
         )
-        // Обновляем список, если открыта вкладка закладок
-        if (_uiState.value.selectedCinemaCategory == "⭐ Закладки") {
-            _uiState.value = _uiState.value.copy(cinemaMovies = historyRepo.getFavorites())
-        }
     }
 
     fun isFavoriteMovie(movieId: String): Boolean {
         return historyRepo.isFavorite(movieId)
     }
 
-    // Остановка кино и возврат часов/Алисы
     fun stopCinemaAndReturnAlice() {
         vibrate(50)
         _uiState.value = _uiState.value.copy(activeMoviePlaying = null)
-        executeCommand("am force-stop org.smarttube.stable; am force-stop com.softwinner.fireplayer; am force-stop org.xbmc.kodi; input keyevent 3; monkey -p ru.yandex.quasar.app -c android.intent.category.LAUNCHER 1; am start -a android.intent.action.MAIN -c android.intent.category.HOME")
+        launchAlice()
     }
 
     fun clearLastMessage() {
@@ -495,10 +528,10 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     private fun executeCommand(command: String) {
         viewModelScope.launch {
             val result = adbClient.execute(command)
-            if (result.isSuccess) {
-                _uiState.value = _uiState.value.copy(connectionStatus = StationConnectionStatus.CONNECTED)
-            } else {
-                _uiState.value = _uiState.value.copy(connectionStatus = StationConnectionStatus.UNAVAILABLE)
+            if (!result.isSuccess) {
+                _uiState.value = _uiState.value.copy(
+                    connectionStatus = StationConnectionStatus.UNAVAILABLE
+                )
             }
         }
     }
@@ -507,7 +540,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         fun extractUrl(text: String): String {
             val regex = Regex("https?://[^\\s]+")
             val match = regex.find(text)
-            return match?.value ?: text.trim()
+            return match?.value ?: ""
         }
     }
 }

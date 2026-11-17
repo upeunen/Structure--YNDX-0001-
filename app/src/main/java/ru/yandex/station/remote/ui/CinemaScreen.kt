@@ -676,6 +676,45 @@ fun CinemaScreen(
                 }
             )
         }
+
+        // Диалог повторного поиска пиров, если раздача не ответила за 15 секунд
+        uiState.pendingPeerRetry?.let { pending ->
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissPeerRetry() },
+                containerColor = DarkSurface,
+                title = {
+                    Text(
+                        text = "Раздача не отвечает",
+                        color = TextPrimary,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Text(
+                        text = "Не удалось найти раздачу «${pending.movie.title}» (нет пиров). Ищем дальше?",
+                        color = TextSecondary,
+                        fontSize = 14.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { viewModel.retryPeerSearch() },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AccentYandex,
+                            contentColor = Color.Black
+                        )
+                    ) {
+                        Text("Искать дальше", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.dismissPeerRetry() }) {
+                        Text("Отмена", color = TextSecondary)
+                    }
+                }
+            )
+        }
     }
 }
 }

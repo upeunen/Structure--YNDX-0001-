@@ -32,3 +32,8 @@ data class PendingEpisodeSelection(
     val lastFileId: Int = -1,
     val lastPositionSec: Long = 0L
 )
+
+data class PendingPeerRetry(
+    val torrentHash: String,
+    val movie: MovieItem
+)

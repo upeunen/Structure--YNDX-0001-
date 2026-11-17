@@ -58,6 +58,7 @@ data class RemoteUiState(
     val activeMoviePlaying: MovieItem? = null,
     val activePlaybackSec: Long = 0L,
     val pendingEpisodeSelection: PendingEpisodeSelection? = null,
+    val pendingPeerRetry: PendingPeerRetry? = null,
     val debugLogs: List<String> = emptyList()
 )
 
@@ -99,6 +100,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     private var activePositionSec: Long = 0L
     private var isPlaybackPaused: Boolean = false
     private var playbackMonitorJob: kotlinx.coroutines.Job? = null
+    private var youtubeAutoHideJob: kotlinx.coroutines.Job? = null
 
     init {
         checkConnection()
@@ -279,14 +281,29 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private fun cancelYouTubeAutoHide() {
+        youtubeAutoHideJob?.cancel()
+        youtubeAutoHideJob = null
+    }
+
+    private fun scheduleYouTubeAutoHide() {
+        cancelYouTubeAutoHide()
+        youtubeAutoHideJob = viewModelScope.launch {
+            delay(30000L)
+            adbClient.execute("dumpsys window windows | grep -q \"mCurrentFocus=.*org.smarttube.stable\" && (input keyevent 19; sleep 0.3; input keyevent 19)")
+        }
+    }
+
     fun sendKeyEvent(keyCode: Int) {
         vibrate(30)
+        cancelYouTubeAutoHide()
         executeCommand("input keyevent $keyCode")
     }
 
     // Ввод текста с клавиатуры телефона на ТВ
     fun sendText(rawText: String) {
         vibrate(30)
+        cancelYouTubeAutoHide()
         if (rawText.isEmpty()) return
         val escaped = rawText
             .replace(" ", "%s")
@@ -325,18 +342,21 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     // Управление медиаплеером YouTube / ТВ
     fun mediaPlayPause() {
         vibrate(40)
+        cancelYouTubeAutoHide()
         isPlaybackPaused = !isPlaybackPaused
         executeCommand("input keyevent 85")
     }
 
     fun mediaRewind() {
         vibrate(30)
+        cancelYouTubeAutoHide()
         activePositionSec = (activePositionSec - 10L).coerceAtLeast(0L)
         executeCommand("input keyevent 89")
     }
 
     fun mediaFastForward() {
         vibrate(30)
+        cancelYouTubeAutoHide()
         activePositionSec += 10L
         _uiState.value = _uiState.value.copy(activePlaybackSec = activePositionSec)
         executeCommand("input keyevent 90")
@@ -344,9 +364,10 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
     fun seekRelativeSeconds(deltaSec: Long) {
         vibrate(30)
+        cancelYouTubeAutoHide()
         activePositionSec = (activePositionSec + deltaSec).coerceAtLeast(0L)
         _uiState.value = _uiState.value.copy(activePlaybackSec = activePositionSec)
-        val keyCode = if (deltaSec >= 0) 22 else 21 // В VLC стрелки Вправо/Влево плавно перематывают по 10 сек
+        val keyCode = if (deltaSec >= 0) 22 else 21
         val steps = (kotlin.math.abs(deltaSec) / 10L).coerceIn(1L, 6L).toInt()
         viewModelScope.launch {
             for (i in 1..steps) {
@@ -358,6 +379,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
     fun mediaPrevious() {
         vibrate(40)
+        cancelYouTubeAutoHide()
         if (_uiState.value.activeMoviePlaying != null && activeSeriesFiles.size > 1) {
             playPreviousEpisode()
         } else {
@@ -367,6 +389,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
     fun mediaNext() {
         vibrate(40)
+        cancelYouTubeAutoHide()
         if (_uiState.value.activeMoviePlaying != null && activeSeriesFiles.size > 1) {
             playNextEpisode()
         } else {
@@ -376,6 +399,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
     fun volumeMute() {
         vibrate(30)
+        cancelYouTubeAutoHide()
         executeCommand("input keyevent 164")
     }
 
@@ -450,6 +474,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                     lastMessage = if (isUrl) "Видео отправлено на телевизор" else "Поиск «$text» запущен на ТВ"
                 )
                 onComplete?.invoke(true)
+                scheduleYouTubeAutoHide()
 
                 // Подтягиваем реальное название ролика с YouTube для истории
                 if (isUrl) {
@@ -797,15 +822,16 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             lastMessage = "Поиск файлов раздачи..."
         )
         torrServerClient.wakeTorrent(torrentHash)
-        val videoFiles = torrServerClient.waitForVideoFiles(torrentHash, maxWaitSec = 20)
+        val videoFiles = torrServerClient.waitForVideoFiles(torrentHash, maxWaitSec = 15)
         addLog("waitForVideoFiles($torrentHash): найдено ${videoFiles.size} файлов")
 
         if (videoFiles.isEmpty()) {
-            val errMsg = "Нет пиров / раздача не отвечает"
+            val errMsg = "Не удалось найти раздачу (нет пиров)"
             _uiState.value = _uiState.value.copy(
                 isCinemaLoading = false,
                 cinemaStatusMessage = errMsg,
-                lastMessage = errMsg
+                lastMessage = errMsg,
+                pendingPeerRetry = PendingPeerRetry(torrentHash = torrentHash, movie = movie)
             )
             return
         }
@@ -857,6 +883,23 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             pendingEpisodeSelection = null,
             isCinemaLoading = false,
             cinemaStatusMessage = null
+        )
+    }
+
+    fun retryPeerSearch() {
+        val pending = _uiState.value.pendingPeerRetry ?: return
+        vibrate(35)
+        _uiState.value = _uiState.value.copy(pendingPeerRetry = null)
+        viewModelScope.launch {
+            prepareAndPlayTorrent(pending.torrentHash, pending.movie)
+        }
+    }
+
+    fun dismissPeerRetry() {
+        _uiState.value = _uiState.value.copy(
+            pendingPeerRetry = null,
+            isCinemaLoading = false,
+            cinemaStatusMessage = "Запуск отменён"
         )
     }
 
@@ -968,12 +1011,10 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         val savedPosSec = historyRepo.getFilePositionSec(torrentHash, file.id)
         val posExtra = if (savedPosSec > 15L) "--ei position ${savedPosSec * 1000L} " else ""
         val streamUrl = torrServerClient.getStreamUrl(torrentHash, file.id)
-        // Запускаем VLC (если установлен, чтобы работали все аудиодорожки AC3/DTS), иначе штатный fireplayer
+        // Запускаем штатный аппаратный плеер Станции (VLC падает с 404 на HEAD-запрос TorrServer Silo.2)
         val adbCmd = "am force-stop org.smarttube.stable; am force-stop org.videolan.vlc; am force-stop com.softwinner.fireplayer; " +
             "(svc power stayon true; settings put secure screensaver_enabled 0; input keyevent 224) >/dev/null 2>&1 & " +
-            "if pm path org.videolan.vlc >/dev/null 2>&1; then " +
-            "am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" -p org.videolan.vlc $posExtra; " +
-            "else am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" $posExtra; fi"
+            "am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" $posExtra"
         var adbResult = adbClient.execute(adbCmd)
 
         if (!adbResult.isSuccess) {
@@ -1027,22 +1068,31 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             // 1. Ставим плеер на паузу
             executeCommand("input keyevent 85")
 
-            // 2. Будим торрент и запрашиваем наполнение кэша
+            // 2. Будим торрент и запрашиваем наполнение кэша для точного fileId
             val activeMovie = _uiState.value.activeMoviePlaying
+            var activeHash: String? = null
             if (activeMovie != null) {
                 val hash = torrServerClient.extractHashFromMagnet(activeMovie.magnetUrl)
                     ?: if (activeMovie.magnetUrl.contains("/stream/")) {
                         activeMovie.magnetUrl.substringAfter("/stream/").substringBefore("/")
                     } else null
+                val exactFileId = if (activeMovie.magnetUrl.contains("/stream/")) {
+                    activeMovie.magnetUrl.substringAfter("/stream/").substringAfter("/", "0").toIntOrNull() ?: 0
+                } else 0
 
                 if (!hash.isNullOrBlank()) {
+                    activeHash = hash
                     torrServerClient.wakeTorrent(hash)
-                    torrServerClient.preloadFile(hash, 0)
+                    torrServerClient.preloadFile(hash, exactFileId)
                 }
             }
 
-            // 3. Ждем 4 секунды с крутящимся прелоадером
-            delay(4000)
+            // 3. Ожидаем реальное наполнение буфера
+            if (activeHash != null) {
+                torrServerClient.waitForBuffer(activeHash, minBytes = 1536 * 1024L, maxWaitMs = 8000L)
+            } else {
+                delay(3000)
+            }
 
             // 4. Проверяем / перезапускаем плеер, если он вылетел
             if (activeMovie != null && activeMovie.magnetUrl.startsWith("http")) {

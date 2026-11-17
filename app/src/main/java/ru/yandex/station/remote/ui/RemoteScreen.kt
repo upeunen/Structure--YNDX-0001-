@@ -209,12 +209,12 @@ fun RemoteScreen(
                             onClick = { viewModel.launchYouTube() }
                         )
                         QuickModeButton(
-                            title = "🎬 Кино",
-                            subtitle = "Kodi",
+                            title = "🎬 Кинозал",
+                            subtitle = "Торренты",
                             icon = Icons.Default.Movie,
                             accentColor = AccentBlue,
                             modifier = Modifier.weight(1f),
-                            onClick = { viewModel.launchKodi() }
+                            onClick = { viewModel.setAppScreen(AppScreen.CINEMA) }
                         )
                         QuickModeButton(
                             title = "🏠 Алиса",

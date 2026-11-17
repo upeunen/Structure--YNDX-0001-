@@ -1019,12 +1019,21 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         val savedPosSec = historyRepo.getFilePositionSec(torrentHash, file.id)
         val posExtra = if (savedPosSec > 15L) "--ei position ${savedPosSec * 1000L} " else ""
         val streamUrl = torrServerClient.getStreamUrl(torrentHash, file.id)
-        // Запускаем Just Player (ExoPlayer + FFmpeg: играет любой звук AC3/DTS и не делает HEAD-запросов), иначе штатный fireplayer
-        val adbCmd = "am force-stop org.smarttube.stable; am force-stop org.videolan.vlc; am force-stop com.brouken.player; am force-stop com.softwinner.fireplayer; " +
-            "(svc power stayon true; settings put secure screensaver_enabled 0; input keyevent 224) >/dev/null 2>&1 & " +
-            "if pm path com.brouken.player >/dev/null 2>&1; then " +
-            "am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" -p com.brouken.player; " +
-            "else am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" $posExtra; fi"
+        val isLegacyContainer = file.name.lowercase().let {
+            it.endsWith(".avi") || it.endsWith(".wmv") || it.endsWith(".flv") || it.endsWith(".vob")
+        }
+        // Для .avi/.wmv используем штатный fireplayer (ExoPlayer в Just Player не поддерживает старые AVI), для .mkv/.mp4 — Just Player (играет AC3/DTS)
+        val adbCmd = if (isLegacyContainer) {
+            "am force-stop org.smarttube.stable; am force-stop org.videolan.vlc; am force-stop com.brouken.player; am force-stop com.softwinner.fireplayer; " +
+                "(svc power stayon true; settings put secure screensaver_enabled 0; input keyevent 224) >/dev/null 2>&1 & " +
+                "am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" $posExtra"
+        } else {
+            "am force-stop org.smarttube.stable; am force-stop org.videolan.vlc; am force-stop com.brouken.player; am force-stop com.softwinner.fireplayer; " +
+                "(svc power stayon true; settings put secure screensaver_enabled 0; input keyevent 224) >/dev/null 2>&1 & " +
+                "if pm path com.brouken.player >/dev/null 2>&1; then " +
+                "am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" -p com.brouken.player; " +
+                "else am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" $posExtra; fi"
+        }
         var adbResult = adbClient.execute(adbCmd)
 
         if (!adbResult.isSuccess) {

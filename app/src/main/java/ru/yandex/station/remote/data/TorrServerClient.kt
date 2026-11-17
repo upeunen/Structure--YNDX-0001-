@@ -1,6 +1,7 @@
 package ru.yandex.station.remote.data
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -56,7 +57,6 @@ class TorrServerClient(
             val stream = if (responseCode in 200..299) conn.inputStream else conn.errorStream
             val responseText = stream?.bufferedReader()?.use { it.readText() } ?: ""
 
-            // Извлекаем хэш торрента из JSON
             val hashFromJson = try {
                 val json = JSONObject(responseText)
                 json.optString("hash").ifEmpty { json.optString("Hash") }
@@ -71,7 +71,6 @@ class TorrServerClient(
                 Result.failure(Exception("Сервер вернул код $responseCode: $responseText"))
             }
         } catch (e: Exception) {
-            // Если сеть дала сбой, но у нас есть прямой хэш из magnet-ссылки, используем его
             val fallbackHash = extractHashFromMagnet(magnetUrl)
             if (!fallbackHash.isNullOrBlank()) {
                 Result.success(fallbackHash)
@@ -135,5 +134,81 @@ class TorrServerClient(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    // Ожидание метаданных и поиск ID главного видеофайла в торренте
+    suspend fun resolveBestVideoFileId(torrentHash: String, maxWaitSec: Int = 12): Int = withContext(Dispatchers.IO) {
+        val videoExtensions = listOf(".mp4", ".mkv", ".avi", ".ts", ".mov", ".m2ts", ".webm", ".flv", ".vob", ".wmv")
+        val startTime = System.currentTimeMillis()
+
+        while (System.currentTimeMillis() - startTime < maxWaitSec * 1000L) {
+            try {
+                val url = URL("$baseUrl/api/torrents")
+                val conn = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 3000
+                    readTimeout = 3000
+                }
+
+                if (conn.responseCode in 200..299) {
+                    val body = conn.inputStream.bufferedReader().use { it.readText() }
+                    val json = JSONObject(body)
+                    val torrentsArray = json.optJSONArray("torrents")
+
+                    if (torrentsArray != null) {
+                        for (i in 0 until torrentsArray.length()) {
+                            val tObj = torrentsArray.getJSONObject(i)
+                            val h = tObj.optString("hash")
+                            if (h.equals(torrentHash, ignoreCase = true)) {
+                                val fileStats = tObj.optJSONArray("file_stats")
+                                if (fileStats != null && fileStats.length() > 0) {
+                                    var bestId = 0
+                                    var maxLength = -1L
+
+                                    for (j in 0 until fileStats.length()) {
+                                        val fObj = fileStats.getJSONObject(j)
+                                        val id = fObj.optInt("id", j)
+                                        val path = (fObj.optString("path") + " " + fObj.optString("name")).lowercase()
+                                        val length = fObj.optLong("length", 0L)
+
+                                        val isVideo = videoExtensions.any { ext -> path.contains(ext) }
+                                        if (isVideo) {
+                                            if (length > maxLength) {
+                                                maxLength = length
+                                                bestId = id
+                                            }
+                                        }
+                                    }
+
+                                    if (maxLength > 0L) {
+                                        return@withContext bestId
+                                    }
+
+                                    // Если расширения не указаны, берем файл с максимальным размером (> 50 МБ)
+                                    for (j in 0 until fileStats.length()) {
+                                        val fObj = fileStats.getJSONObject(j)
+                                        val id = fObj.optInt("id", j)
+                                        val length = fObj.optLong("length", 0L)
+                                        if (length > maxLength && length > 50 * 1024 * 1024L) {
+                                            maxLength = length
+                                            bestId = id
+                                        }
+                                    }
+
+                                    if (maxLength > 0L) {
+                                        return@withContext bestId
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+
+            delay(1500)
+        }
+
+        // Если метаданные еще не готовы или только 1 файл, возвращаем 0
+        0
     }
 }

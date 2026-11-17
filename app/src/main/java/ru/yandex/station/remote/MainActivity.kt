@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.TouchApp
@@ -47,6 +48,7 @@ class MainActivity : ComponentActivity() {
                             containerColor = DarkSurface,
                             contentColor = AccentYandex
                         ) {
+                            // 1. Пульт (главный экран, всегда доступен)
                             NavigationBarItem(
                                 selected = uiState.activeAppScreen == AppScreen.REMOTE,
                                 onClick = { viewModel.setAppScreen(AppScreen.REMOTE) },
@@ -66,25 +68,7 @@ class MainActivity : ComponentActivity() {
                                 )
                             )
 
-                            NavigationBarItem(
-                                selected = uiState.activeAppScreen == AppScreen.YOUTUBE,
-                                onClick = { viewModel.setAppScreen(AppScreen.YOUTUBE) },
-                                icon = {
-                                    Icon(
-                                        imageVector = Icons.Default.PlayCircle,
-                                        contentDescription = "YouTube"
-                                    )
-                                },
-                                label = { Text("YouTube") },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = AccentRed,
-                                    unselectedIconColor = TextSecondary,
-                                    selectedTextColor = AccentRed,
-                                    unselectedTextColor = TextSecondary,
-                                    indicatorColor = DarkSurfaceElevated
-                                )
-                            )
-
+                            // 2. Кинозал
                             NavigationBarItem(
                                 selected = uiState.activeAppScreen == AppScreen.CINEMA,
                                 onClick = { viewModel.setAppScreen(AppScreen.CINEMA) },
@@ -99,6 +83,50 @@ class MainActivity : ComponentActivity() {
                                     selectedIconColor = AccentYandex,
                                     unselectedIconColor = TextSecondary,
                                     selectedTextColor = AccentYandex,
+                                    unselectedTextColor = TextSecondary,
+                                    indicatorColor = DarkSurfaceElevated
+                                )
+                            )
+
+                            // 3. Алиса (быстрый возврат к часам в 1 касание)
+                            NavigationBarItem(
+                                selected = false,
+                                onClick = {
+                                    viewModel.launchAlice()
+                                    viewModel.setAppScreen(AppScreen.REMOTE)
+                                },
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Home,
+                                        contentDescription = "Алиса",
+                                        tint = AccentYandex
+                                    )
+                                },
+                                label = { Text("Алиса", color = AccentYandex) },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = AccentYandex,
+                                    unselectedIconColor = AccentYandex,
+                                    selectedTextColor = AccentYandex,
+                                    unselectedTextColor = AccentYandex,
+                                    indicatorColor = DarkSurfaceElevated
+                                )
+                            )
+
+                            // 4. YouTube
+                            NavigationBarItem(
+                                selected = uiState.activeAppScreen == AppScreen.YOUTUBE,
+                                onClick = { viewModel.setAppScreen(AppScreen.YOUTUBE) },
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayCircle,
+                                        contentDescription = "YouTube"
+                                    )
+                                },
+                                label = { Text("YouTube") },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = AccentRed,
+                                    unselectedIconColor = TextSecondary,
+                                    selectedTextColor = AccentRed,
                                     unselectedTextColor = TextSecondary,
                                     indicatorColor = DarkSurfaceElevated
                                 )
@@ -118,15 +146,15 @@ class MainActivity : ComponentActivity() {
                                     onOpenSettings = { showSettings = true }
                                 )
                             }
-                            AppScreen.YOUTUBE -> {
-                                YouTubeScreen(
+                            AppScreen.CINEMA -> {
+                                CinemaScreen(
                                     viewModel = viewModel,
                                     onOpenSettings = { showSettings = true },
                                     onBackToRemote = { viewModel.setAppScreen(AppScreen.REMOTE) }
                                 )
                             }
-                            AppScreen.CINEMA -> {
-                                CinemaScreen(
+                            AppScreen.YOUTUBE -> {
+                                YouTubeScreen(
                                     viewModel = viewModel,
                                     onOpenSettings = { showSettings = true },
                                     onBackToRemote = { viewModel.setAppScreen(AppScreen.REMOTE) }

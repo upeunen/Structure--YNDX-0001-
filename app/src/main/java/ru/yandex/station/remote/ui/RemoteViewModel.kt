@@ -227,7 +227,10 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
     fun launchAlice() {
         vibrate(50)
-        executeCommand("am force-stop org.smarttube.stable; am force-stop com.softwinner.fireplayer; input keyevent 3; monkey -p ru.yandex.quasar.app -c android.intent.category.LAUNCHER 1; am start -a android.intent.action.MAIN -c android.intent.category.HOME")
+        _uiState.value = _uiState.value.copy(activeMoviePlaying = null, lastMessage = "Экран Алисы включен")
+        viewModelScope.launch {
+            adbClient.execute("am force-stop com.softwinner.fireplayer; am force-stop org.smarttube.stable; input keyevent 3; am start -a android.intent.action.MAIN -c android.intent.category.HOME")
+        }
     }
 
     // Управление мышью / сенсорной площадкой
@@ -398,7 +401,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 isCinemaLoading = true,
-                lastMessage = "Запуск «${movie.title}» на Станции..."
+                lastMessage = "Подготовка «${movie.title}»..."
             )
             historyRepo.addToHistory(movie)
 
@@ -414,12 +417,24 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 return@launch
             }
 
-            // 2. Формируем локальный видеопоток для плеера Станции
-            val streamUrl = torrServerClient.getStreamUrl(torrentHash, 0)
+            // 2. Ожидаем кэширование метаданных и находим точный ID видеофайла
+            _uiState.value = _uiState.value.copy(
+                lastMessage = "Кэширование и поиск видеопотока..."
+            )
+            val bestFileId = torrServerClient.resolveBestVideoFileId(torrentHash, maxWaitSec = 8)
 
-            // 3. Сворачиваем YouTube и разворачиваем встроенный видеоплеер
-            val adbCmd = "am force-stop org.smarttube.stable; am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\""
-            val adbResult = adbClient.execute(adbCmd)
+            // 3. Формируем локальный видеопоток для плеера Станции
+            val streamUrl = torrServerClient.getStreamUrl(torrentHash, bestFileId)
+
+            // 4. Сворачиваем YouTube и запускаем аппаратный плеер Allwinner
+            val adbCmd = "am force-stop org.smarttube.stable; am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\""
+            var adbResult = adbClient.execute(adbCmd)
+
+            if (!adbResult.isSuccess) {
+                // Резервный запуск через системный интент
+                val fallbackCmd = "am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\""
+                adbResult = adbClient.execute(fallbackCmd)
+            }
 
             if (adbResult.isSuccess) {
                 _uiState.value = _uiState.value.copy(
@@ -430,7 +445,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             } else {
                 _uiState.value = _uiState.value.copy(
                     isCinemaLoading = false,
-                    lastMessage = "Ошибка запуска плеера через ADB: ${adbResult.exceptionOrNull()?.message}"
+                    lastMessage = "Ошибка запуска плеера: ${adbResult.exceptionOrNull()?.message}"
                 )
             }
         }
@@ -472,21 +487,30 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             val cleanName = fileName.removeSuffix(".torrent")
+            _uiState.value = _uiState.value.copy(
+                lastMessage = "Кэширование и поиск видеопотока..."
+            )
+            val bestFileId = torrServerClient.resolveBestVideoFileId(torrentHash, maxWaitSec = 8)
+            val streamUrl = torrServerClient.getStreamUrl(torrentHash, bestFileId)
+
             val movie = MovieItem(
                 id = "torrent_upload_" + System.currentTimeMillis(),
                 title = cleanName,
                 quality = "HD",
                 size = "Файл",
                 seeds = 100,
-                magnetUrl = torrServerClient.getStreamUrl(torrentHash, 0),
+                magnetUrl = streamUrl,
                 category = "Загруженные",
                 description = "Загружено из файла $fileName"
             )
             historyRepo.addToHistory(movie)
 
-            val streamUrl = torrServerClient.getStreamUrl(torrentHash, 0)
-            val adbCmd = "am force-stop org.smarttube.stable; am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\""
-            val adbResult = adbClient.execute(adbCmd)
+            val adbCmd = "am force-stop org.smarttube.stable; am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\""
+            var adbResult = adbClient.execute(adbCmd)
+
+            if (!adbResult.isSuccess) {
+                adbResult = adbClient.execute("am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\"")
+            }
 
             if (adbResult.isSuccess) {
                 _uiState.value = _uiState.value.copy(

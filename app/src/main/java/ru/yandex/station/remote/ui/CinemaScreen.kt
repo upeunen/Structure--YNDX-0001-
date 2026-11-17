@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.VolumeDown
@@ -39,7 +40,7 @@ import android.provider.OpenableColumns
 fun CinemaScreen(
     viewModel: RemoteViewModel,
     onOpenSettings: () -> Unit = {},
-    onBackToRemote: () -> Unit = {}
+    onOpenCollections: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -48,24 +49,47 @@ fun CinemaScreen(
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
-        uri?.let {
-            try {
-                val fileName = try {
-                    context.contentResolver.query(it, null, null, null, null)?.use { cursor ->
-                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                        if (cursor.moveToFirst() && nameIndex >= 0) {
-                            cursor.getString(nameIndex)
-                        } else null
-                    }
-                } catch (_: Exception) { null } ?: ("movie_" + System.currentTimeMillis() + ".torrent")
+        if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            val fileName = try {
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (cursor.moveToFirst() && nameIndex >= 0) {
+                        cursor.getString(nameIndex)
+                    } else null
+                }
+            } catch (_: Exception) { null } ?: ("movie_" + System.currentTimeMillis() + ".torrent")
 
-                context.contentResolver.openInputStream(it)?.use { inputStream ->
-                    val bytes = inputStream.readBytes()
-                    viewModel.uploadTorrentFileAndPlay(bytes, fileName)
+            val bytes = try {
+                val stream = context.contentResolver.openInputStream(uri)
+                if (stream != null) {
+                    stream.use { it.readBytes() }
+                } else {
+                    context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                        java.io.FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
+                    }
                 }
             } catch (e: Exception) {
-                // Ошибка чтения файла
+                val msg = e.message ?: ""
+                if (msg.contains("pending", ignoreCase = true) || msg.contains("trashed", ignoreCase = true)) {
+                    viewModel.showMessage("Файл ещё не завершил скачивание в системе (pending) или в корзине. Подождите окончания загрузки или выберите файл из папки «Загрузки».")
+                } else {
+                    viewModel.showMessage("Ошибка чтения файла: ${e.message ?: "неизвестная ошибка"}")
+                }
+                return@rememberLauncherForActivityResult
             }
+
+            if (bytes == null) {
+                viewModel.showMessage("Не удалось открыть выбранный файл")
+                return@rememberLauncherForActivityResult
+            }
+            if (bytes.isEmpty()) {
+                viewModel.showMessage("Выбранный торрент-файл пуст")
+                return@rememberLauncherForActivityResult
+            }
+            viewModel.uploadTorrentFileAndPlay(bytes, fileName)
+        } catch (e: Exception) {
+            viewModel.showMessage("Ошибка чтения файла: ${e.message ?: "неизвестная ошибка"}")
         }
     }
 
@@ -73,19 +97,10 @@ fun CinemaScreen(
         containerColor = OledBlack,
         topBar = {
             TopAppBar(
-                navigationIcon = {
-                    IconButton(onClick = onBackToRemote) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "К пульту",
-                            tint = TextPrimary
-                        )
-                    }
-                },
                 title = {
                     Column {
                         Text(
-                            text = "🎬 Кинозал (TorrServer)",
+                            text = "🎬 Кинозал",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary
@@ -116,6 +131,28 @@ fun CinemaScreen(
                     }
                 },
                 actions = {
+                    FilledTonalButton(
+                        onClick = onOpenCollections,
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = AccentYandex,
+                            contentColor = Color.Black
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(end = 4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.VideoLibrary,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Подборки",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                     IconButton(onClick = onOpenSettings) {
                         Icon(
                             imageVector = Icons.Default.Settings,
@@ -238,9 +275,9 @@ fun CinemaScreen(
                 }
             }
 
-            // Горизонтальные категории и подборки
+            // Горизонтальные категории: История и Закладки
             item {
-                val categories = listOf("Новинки", "Топ фильмов", "Сериалы", "Классика", "⭐ Закладки", "🕒 История")
+                val categories = listOf("🕒 История", "⭐ Закладки")
                 val scrollState = rememberScrollState()
 
                 Row(
@@ -269,6 +306,103 @@ fun CinemaScreen(
                                     color = if (isSelected) Color.Black else TextPrimary
                                 )
                             }
+                        }
+                    }
+                }
+            }
+
+            // Статус загрузки / запуска файла
+            uiState.cinemaStatusMessage?.let { statusMsg ->
+                item {
+                    Surface(
+                        color = DarkSurface,
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceElevated),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = statusMsg,
+                            color = TextPrimary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                        )
+                    }
+                }
+            }
+
+            // Панель логов работы с кнопкой копирования
+            item {
+                var logsExpanded by remember { mutableStateOf(true) }
+                Surface(
+                    color = DarkSurface,
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceElevated),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { logsExpanded = !logsExpanded }
+                            ) {
+                                Text(
+                                    text = if (logsExpanded) "▼ Логи (${uiState.debugLogs.size})" else "▶ Логи (${uiState.debugLogs.size})",
+                                    color = AccentYandex,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedButton(
+                                    onClick = {
+                                        val allLogs = uiState.debugLogs.joinToString("\n").ifBlank { "Логов пока нет" }
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("StationLogs", allLogs))
+                                        viewModel.showMessage("Логи скопированы в буфер")
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.height(28.dp)
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(13.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Копировать", fontSize = 11.sp)
+                                }
+                                if (uiState.debugLogs.isNotEmpty()) {
+                                    TextButton(
+                                        onClick = { viewModel.clearLogs() },
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(28.dp)
+                                    ) {
+                                        Text("Очистить", fontSize = 11.sp, color = TextSecondary)
+                                    }
+                                }
+                            }
+                        }
+
+                        if (logsExpanded) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            val logText = if (uiState.debugLogs.isEmpty()) {
+                                "Пока нет событий..."
+                            } else {
+                                uiState.debugLogs.takeLast(30).joinToString("\n")
+                            }
+                            Text(
+                                text = logText,
+                                color = TextSecondary,
+                                fontSize = 11.sp,
+                                lineHeight = 14.sp,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 150.dp)
+                                    .verticalScroll(rememberScrollState())
+                            )
                         }
                     }
                 }
@@ -450,6 +584,95 @@ fun CinemaScreen(
                     }
                 }
             }
+        }
+
+        // Диалог выбора серии / файла для многофайловых раздач
+        uiState.pendingEpisodeSelection?.let { pending ->
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissEpisodeSelection() },
+                containerColor = DarkSurface,
+                title = {
+                    Column {
+                        Text(
+                            text = "Выберите серию / файл",
+                            color = TextPrimary,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = pending.movie.title,
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            maxLines = 1
+                        )
+                    }
+                },
+                text = {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 380.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(pending.files, key = { it.id }) { videoFile ->
+                            val sizeText = if (videoFile.sizeBytes >= 1024L * 1024L * 1024L) {
+                                String.format(java.util.Locale.US, "%.2f ГБ", videoFile.sizeBytes / (1024.0 * 1024.0 * 1024.0))
+                            } else {
+                                String.format(java.util.Locale.US, "%.0f МБ", videoFile.sizeBytes / (1024.0 * 1024.0))
+                            }
+                            val isLastWatched = pending.lastFileId == videoFile.id
+                            val subtitleText = if (isLastWatched && pending.lastPositionSec > 15L) {
+                                val m = pending.lastPositionSec / 60
+                                val s = pending.lastPositionSec % 60
+                                "$sizeText • Продолжить (${String.format(java.util.Locale.US, "%02d:%02d", m, s)})"
+                            } else if (isLastWatched) {
+                                "$sizeText • Последняя"
+                            } else {
+                                sizeText
+                            }
+                            Surface(
+                                onClick = { viewModel.selectEpisodeAndPlay(videoFile) },
+                                shape = RoundedCornerShape(12.dp),
+                                color = DarkSurfaceElevated,
+                                border = if (isLastWatched) androidx.compose.foundation.BorderStroke(1.5.dp, AccentYandex) else null,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                        Text(
+                                            text = videoFile.name,
+                                            color = TextPrimary,
+                                            fontSize = 13.sp,
+                                            fontWeight = if (isLastWatched) FontWeight.Bold else FontWeight.Medium,
+                                            maxLines = 2
+                                        )
+                                        Text(
+                                            text = subtitleText,
+                                            color = if (isLastWatched) AccentYandex else TextSecondary,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = "Смотреть",
+                                        tint = AccentYandex
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { viewModel.dismissEpisodeSelection() }) {
+                        Text("Отмена", color = TextSecondary)
+                    }
+                }
+            )
         }
     }
 }

@@ -24,14 +24,13 @@ enum class StationConnectionStatus {
 }
 
 enum class AppScreen {
-    REMOTE,
-    YOUTUBE,
-    CINEMA
+    CINEMA,
+    COLLECTIONS,
+    YOUTUBE
 }
 
 enum class RemoteTab {
     REMOTE,
-    TOUCHPAD,
     KEYBOARD
 }
 
@@ -41,10 +40,9 @@ data class RemoteUiState(
     val torrServerPort: Int = 8090,
     val connectionStatus: StationConnectionStatus = StationConnectionStatus.IDLE,
     val lastMessage: String? = null,
-    val activeAppScreen: AppScreen = AppScreen.REMOTE,
+    val activeAppScreen: AppScreen = AppScreen.CINEMA,
+    val isRemoteModalOpen: Boolean = false,
     val activeTab: RemoteTab = RemoteTab.REMOTE,
-    val cursorX: Float = 960f,
-    val cursorY: Float = 540f,
     val keyboardInput: String = "",
     val rutrackerLogin: String = "",
     val rutrackerPass: String = "",
@@ -53,10 +51,14 @@ data class RemoteUiState(
     val youtubeHistory: List<YouTubeItem> = emptyList(),
     // Раздел «Кинозал»
     val cinemaSearchQuery: String = "",
-    val selectedCinemaCategory: String = "Новинки",
-    val cinemaMovies: List<MovieItem> = RuTrackerCollections.curatedMovies.filter { it.category == "Новинки" },
+    val selectedCinemaCategory: String = "🕒 История",
+    val cinemaMovies: List<MovieItem> = emptyList(),
     val isCinemaLoading: Boolean = false,
-    val activeMoviePlaying: MovieItem? = null
+    val cinemaStatusMessage: String? = null,
+    val activeMoviePlaying: MovieItem? = null,
+    val activePlaybackSec: Long = 0L,
+    val pendingEpisodeSelection: PendingEpisodeSelection? = null,
+    val debugLogs: List<String> = emptyList()
 )
 
 class RemoteViewModel(application: Application) : AndroidViewModel(application) {
@@ -70,7 +72,8 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             port = prefs.port,
             rutrackerLogin = prefs.rutrackerLogin,
             rutrackerPass = prefs.rutrackerPassword,
-            youtubeHistory = youtubeHistoryRepo.getHistory()
+            youtubeHistory = youtubeHistoryRepo.getHistory(),
+            cinemaMovies = historyRepo.getHistory()
         )
     )
     val uiState: StateFlow<RemoteUiState> = _uiState.asStateFlow()
@@ -86,13 +89,111 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         application.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
     }
 
+    @Volatile
+    private var isStartingTorrServer: Boolean = false
+
+    private var activeSeriesHash: String? = null
+    private var activeSeriesMovie: MovieItem? = null
+    private var activeSeriesFiles: List<TorrentVideoFile> = emptyList()
+    private var activeSeriesIndex: Int = -1
+    private var activePositionSec: Long = 0L
+    private var isPlaybackPaused: Boolean = false
+    private var playbackMonitorJob: kotlinx.coroutines.Job? = null
+
     init {
         checkConnection()
+        viewModelScope.launch {
+            ensureTorrServerRunning(notifyIfStarted = false)
+        }
+        resolveOldYouTubeHistoryTitles()
     }
 
     fun setAppScreen(screen: AppScreen) {
         vibrate(20)
         _uiState.value = _uiState.value.copy(activeAppScreen = screen)
+        if (screen == AppScreen.CINEMA) {
+            viewModelScope.launch {
+                ensureTorrServerRunning(notifyIfStarted = true)
+            }
+        }
+    }
+
+    // Проверка и автозапуск TorrServer на Станции через ADB при входе в Кинозал
+    suspend fun ensureTorrServerRunning(notifyIfStarted: Boolean = false): Boolean {
+        val hostIp = _uiState.value.ip
+        if (torrServerClient.isServerRunning()) {
+            addLog("TorrServer $hostIp:8090 уже запущен")
+            return true
+        }
+        addLog("TorrServer $hostIp:8090 не отвечает, пробуем запуск через ADB...")
+        if (isStartingTorrServer) {
+            repeat(6) {
+                delay(500)
+                if (torrServerClient.isServerRunning()) return true
+            }
+            return false
+        }
+
+        isStartingTorrServer = true
+        return try {
+            val startCmd =
+                "/system/bin/busybox-smp pidof torrserver >/dev/null 2>&1 || " +
+                    "(cd /data/torrserver && /system/bin/busybox-smp setsid /data/local/bin/torrserver " +
+                    "-c /data/torrserver/config.yaml </dev/null >>/data/torrserver/torr.log 2>&1 &)"
+            val adbResult = adbClient.execute(startCmd)
+            if (adbResult.isFailure) {
+                addLog("ADB запуск TorrServer ошибка: ${adbResult.exceptionOrNull()?.message}")
+                return false
+            }
+
+            repeat(6) {
+                delay(500)
+                if (torrServerClient.isServerRunning()) {
+                    addLog("TorrServer запущен успешно!")
+                    if (notifyIfStarted) {
+                        _uiState.value = _uiState.value.copy(
+                            connectionStatus = StationConnectionStatus.CONNECTED,
+                            lastMessage = "TorrServer запущен на Станции"
+                        )
+                    }
+                    return true
+                }
+            }
+            addLog("TorrServer не поднялся за 3 сек после ADB команды")
+            false
+        } finally {
+            isStartingTorrServer = false
+        }
+    }
+
+    fun openRemoteModal() {
+        vibrate(25)
+        _uiState.value = _uiState.value.copy(isRemoteModalOpen = true)
+        checkConnection()
+    }
+
+    fun closeRemoteModal() {
+        _uiState.value = _uiState.value.copy(isRemoteModalOpen = false)
+    }
+
+    fun showMessage(message: String) {
+        addLog("MSG: $message")
+        _uiState.value = _uiState.value.copy(
+            lastMessage = message,
+            cinemaStatusMessage = message
+        )
+    }
+
+    fun addLog(message: String) {
+        val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+            .format(java.util.Date())
+        val line = "[$time] $message"
+        val updated = (_uiState.value.debugLogs + line).takeLast(100)
+        _uiState.value = _uiState.value.copy(debugLogs = updated)
+    }
+
+    fun clearLogs() {
+        _uiState.value = _uiState.value.copy(debugLogs = emptyList())
     }
 
     fun setActiveTab(tab: RemoteTab) {
@@ -192,27 +293,53 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     // Управление медиаплеером YouTube / ТВ
     fun mediaPlayPause() {
         vibrate(40)
+        isPlaybackPaused = !isPlaybackPaused
         executeCommand("input keyevent 85")
     }
 
     fun mediaRewind() {
         vibrate(30)
+        activePositionSec = (activePositionSec - 10L).coerceAtLeast(0L)
         executeCommand("input keyevent 89")
     }
 
     fun mediaFastForward() {
         vibrate(30)
+        activePositionSec += 10L
+        _uiState.value = _uiState.value.copy(activePlaybackSec = activePositionSec)
         executeCommand("input keyevent 90")
+    }
+
+    fun seekRelativeSeconds(deltaSec: Long) {
+        vibrate(30)
+        activePositionSec = (activePositionSec + deltaSec).coerceAtLeast(0L)
+        _uiState.value = _uiState.value.copy(activePlaybackSec = activePositionSec)
+        val keyCode = if (deltaSec >= 0) 22 else 21 // В VLC стрелки Вправо/Влево плавно перематывают по 10 сек
+        val steps = (kotlin.math.abs(deltaSec) / 10L).coerceIn(1L, 6L).toInt()
+        viewModelScope.launch {
+            for (i in 1..steps) {
+                adbClient.execute("input keyevent $keyCode")
+                if (i < steps) delay(150)
+            }
+        }
     }
 
     fun mediaPrevious() {
         vibrate(40)
-        executeCommand("input keyevent 88")
+        if (_uiState.value.activeMoviePlaying != null && activeSeriesFiles.size > 1) {
+            playPreviousEpisode()
+        } else {
+            executeCommand("input keyevent 88")
+        }
     }
 
     fun mediaNext() {
         vibrate(40)
-        executeCommand("input keyevent 87")
+        if (_uiState.value.activeMoviePlaying != null && activeSeriesFiles.size > 1) {
+            playNextEpisode()
+        } else {
+            executeCommand("input keyevent 87")
+        }
     }
 
     fun volumeMute() {
@@ -222,75 +349,20 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
     fun launchYouTube() {
         vibrate(50)
-        executeCommand("am start -n org.smarttube.stable/com.liskovsoft.smartyoutubetv2.tv.ui.main.SplashActivity")
+        stopPlaybackMonitor()
+        executeCommand("am force-stop com.softwinner.fireplayer; am force-stop org.videolan.vlc; svc power stayon true; input keyevent 224; am start -n org.smarttube.stable/com.liskovsoft.smartyoutubetv2.tv.ui.main.SplashActivity")
     }
 
     fun launchAlice() {
         vibrate(50)
+        stopPlaybackMonitor()
         _uiState.value = _uiState.value.copy(activeMoviePlaying = null, lastMessage = "Остановлено: экран Алисы включен")
         viewModelScope.launch {
-            val cmd = "am force-stop com.softwinner.fireplayer; am force-stop org.smarttube.stable; am force-stop org.schabi.newpipe; am force-stop top.rootu.lampa; input keyevent 86; input keyevent 3; am start -a android.intent.action.MAIN -c android.intent.category.HOME"
+            val cmd = "am force-stop com.softwinner.fireplayer; am force-stop org.videolan.vlc; am force-stop org.smarttube.stable; am force-stop org.schabi.newpipe; am force-stop top.rootu.lampa; input keyevent 86; input keyevent 3; am start -a android.intent.action.MAIN -c android.intent.category.HOME"
             val result = adbClient.execute(cmd)
             if (result.isSuccess) {
                 _uiState.value = _uiState.value.copy(connectionStatus = StationConnectionStatus.CONNECTED)
             }
-        }
-    }
-
-    // Управление мышью / сенсорной площадкой
-    private var accumulatedDragX = 0f
-    private var accumulatedDragY = 0f
-    private val DRAG_THRESHOLD = 28f
-
-    fun onTouchpadDrag(deltaX: Float, deltaY: Float) {
-        accumulatedDragX += deltaX
-        accumulatedDragY += deltaY
-
-        val current = _uiState.value
-        val newX = (current.cursorX + deltaX * 2.5f).coerceIn(0f, 1920f)
-        val newY = (current.cursorY + deltaY * 2.5f).coerceIn(0f, 1080f)
-        _uiState.value = current.copy(cursorX = newX, cursorY = newY)
-
-        if (accumulatedDragX > DRAG_THRESHOLD) {
-            accumulatedDragX = 0f
-            vibrate(15)
-            executeCommand("input keyevent 22") // Вправо
-        } else if (accumulatedDragX < -DRAG_THRESHOLD) {
-            accumulatedDragX = 0f
-            vibrate(15)
-            executeCommand("input keyevent 21") // Влево
-        }
-
-        if (accumulatedDragY > DRAG_THRESHOLD) {
-            accumulatedDragY = 0f
-            vibrate(15)
-            executeCommand("input keyevent 20") // Вниз
-        } else if (accumulatedDragY < -DRAG_THRESHOLD) {
-            accumulatedDragY = 0f
-            vibrate(15)
-            executeCommand("input keyevent 19") // Вверх
-        }
-    }
-
-    fun onTouchpadDragEnd() {
-        accumulatedDragX = 0f
-        accumulatedDragY = 0f
-    }
-
-    fun clickAtCursor() {
-        vibrate(55)
-        val x = _uiState.value.cursorX.toInt()
-        val y = _uiState.value.cursorY.toInt()
-        executeCommand("input keyevent 66; input tap $x $y")
-    }
-
-    fun scroll(scrollUp: Boolean) {
-        vibrate(35)
-        val x = _uiState.value.cursorX.toInt()
-        if (scrollUp) {
-            executeCommand("input swipe $x 750 $x 300 200")
-        } else {
-            executeCommand("input swipe $x 300 $x 750 200")
         }
     }
 
@@ -313,16 +385,20 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
         if (isUrl) {
             val extractedUrl = extractUrl(text).ifEmpty { text }
-            cmd = "am start -a android.intent.action.VIEW -d \"$extractedUrl\" -p org.smarttube.stable"
+            // Если прислано «Поделиться» в формате "Название https://youtu.be/...", берём название из текста
+            val textWithoutUrl = text.replace(extractedUrl, "").trim().trim('-', ':', '|', '—')
+            val initialTitle = textWithoutUrl.takeIf { it.length >= 2 }
+                ?: fallbackYouTubeTitle(extractedUrl)
+            cmd = "am force-stop com.softwinner.fireplayer; svc power stayon true; input keyevent 224; am start -a android.intent.action.VIEW -d \"$extractedUrl\" -p org.smarttube.stable"
             historyItem = YouTubeItem(
                 id = "yt_" + System.currentTimeMillis(),
-                title = extractedUrl,
+                title = initialTitle,
                 urlOrQuery = extractedUrl,
                 isUrl = true
             )
         } else {
             val escaped = text.replace("\"", "\\\"")
-            cmd = "am start -a android.intent.action.SEARCH -q \"$escaped\" -p org.smarttube.stable"
+            cmd = "am force-stop com.softwinner.fireplayer; svc power stayon true; input keyevent 224; am start -a android.intent.action.SEARCH -q \"$escaped\" -p org.smarttube.stable"
             historyItem = YouTubeItem(
                 id = "yt_" + System.currentTimeMillis(),
                 title = text,
@@ -342,6 +418,17 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                     lastMessage = if (isUrl) "Видео отправлено на телевизор" else "Поиск «$text» запущен на ТВ"
                 )
                 onComplete?.invoke(true)
+
+                // Подтягиваем реальное название ролика с YouTube для истории
+                if (isUrl) {
+                    val resolvedTitle = fetchYouTubeTitle(historyItem.urlOrQuery)
+                    if (!resolvedTitle.isNullOrBlank()) {
+                        youtubeHistoryRepo.addToHistory(historyItem.copy(title = resolvedTitle))
+                        _uiState.value = _uiState.value.copy(
+                            youtubeHistory = youtubeHistoryRepo.getHistory()
+                        )
+                    }
+                }
             } else {
                 _uiState.value = _uiState.value.copy(
                     connectionStatus = StationConnectionStatus.UNAVAILABLE,
@@ -360,6 +447,118 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         launchYouTubeInput(rawUrl, onComplete)
     }
 
+    fun openSmartTubeSection(section: String) {
+        vibrate(35)
+        val cmd = when (section) {
+            "menu" -> "input keyevent 21"
+            "search" -> "input keyevent 84"
+            else -> "am force-stop com.softwinner.fireplayer; svc power stayon true; input keyevent 224; am start -n org.smarttube.stable/com.liskovsoft.smartyoutubetv2.tv.ui.main.SplashActivity"
+        }
+        val label = when (section) {
+            "menu" -> "Боковое меню"
+            "search" -> "Поиск"
+            else -> "Главная"
+        }
+        _uiState.value = _uiState.value.copy(lastMessage = "SmartTube: $label")
+        executeCommand(cmd)
+    }
+
+    fun bookmarkCurrentYouTubeVideo() {
+        vibrate(45)
+        viewModelScope.launch {
+            val res = adbClient.execute("dumpsys media_session | grep -iE \"description=|metadata\" | head -n 5")
+            val raw = res.getOrNull().orEmpty()
+            val descMatch = Regex("description=([^,\\n\\r]+)").find(raw)
+            val detectedTitle = descMatch?.groupValues?.get(1)?.trim()
+                ?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
+
+            if (detectedTitle != null) {
+                val item = YouTubeItem(
+                    id = "yt_bm_" + System.currentTimeMillis(),
+                    title = "⭐ $detectedTitle",
+                    urlOrQuery = detectedTitle,
+                    isUrl = false
+                )
+                youtubeHistoryRepo.addToHistory(item)
+                _uiState.value = _uiState.value.copy(
+                    youtubeHistory = youtubeHistoryRepo.getHistory(),
+                    lastMessage = "Сохранено в закладки: $detectedTitle"
+                )
+            } else {
+                val lastItem = _uiState.value.youtubeHistory.firstOrNull()
+                if (lastItem != null) {
+                    val cleanTitle = lastItem.title.removePrefix("⭐ ")
+                    val bookmarked = lastItem.copy(
+                        title = "⭐ $cleanTitle",
+                        timestamp = System.currentTimeMillis()
+                    )
+                    youtubeHistoryRepo.addToHistory(bookmarked)
+                    _uiState.value = _uiState.value.copy(
+                        youtubeHistory = youtubeHistoryRepo.getHistory(),
+                        lastMessage = "Сохранено в закладки: $cleanTitle"
+                    )
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        lastMessage = "Сначала запустите видео, чтобы добавить его в закладки"
+                    )
+                }
+            }
+        }
+    }
+
+    private fun fallbackYouTubeTitle(url: String): String {
+        val idMatch = Regex("(?:youtu\\.be/|v=|shorts/)([A-Za-z0-9_-]{6,})").find(url)
+        val vid = idMatch?.groupValues?.get(1)
+        return if (!vid.isNullOrBlank()) "Видео YouTube ($vid)" else "Видео YouTube"
+    }
+
+    private fun resolveOldYouTubeHistoryTitles() {
+        viewModelScope.launch {
+            val history = youtubeHistoryRepo.getHistory()
+            val toUpdate = history.filter { it.isUrl && it.title.startsWith("http", ignoreCase = true) }
+            if (toUpdate.isEmpty()) return@launch
+            for (item in toUpdate) {
+                val resolved = fetchYouTubeTitle(item.urlOrQuery) ?: fallbackYouTubeTitle(item.urlOrQuery)
+                youtubeHistoryRepo.addToHistory(item.copy(title = resolved))
+            }
+            _uiState.value = _uiState.value.copy(youtubeHistory = youtubeHistoryRepo.getHistory())
+        }
+    }
+
+    private suspend fun fetchYouTubeTitle(videoUrl: String): String? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val encoded = try {
+            java.net.URLEncoder.encode(videoUrl, "UTF-8")
+        } catch (_: Exception) {
+            return@withContext null
+        }
+        val endpoints = listOf(
+            "https://noembed.com/embed?url=$encoded",
+            "https://www.youtube.com/oembed?url=$encoded&format=json"
+        )
+        for (endpoint in endpoints) {
+            var conn: java.net.HttpURLConnection? = null
+            try {
+                val url = java.net.URL(endpoint)
+                conn = (url.openConnection() as java.net.HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 4000
+                    readTimeout = 4000
+                    setRequestProperty("User-Agent", "Mozilla/5.0")
+                }
+                if (conn.responseCode in 200..299) {
+                    val body = conn.inputStream.bufferedReader().use { it.readText() }
+                    val json = org.json.JSONObject(body)
+                    val title = json.optString("title").takeIf { it.isNotBlank() }
+                    if (title != null) return@withContext title
+                }
+            } catch (_: Exception) {
+            } finally {
+                try { conn?.disconnect() } catch (_: Exception) {}
+            }
+        }
+        null
+    }
+
     // ==========================================
     // ЛОГИКА РАЗДЕЛА «КИНОЗАЛ И ТОРРЕНТЫ»
     // ==========================================
@@ -376,104 +575,104 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 val favs = historyRepo.getFavorites()
                 _uiState.value = _uiState.value.copy(cinemaMovies = favs)
             }
-            "🕒 История" -> {
+            else -> {
                 val hist = historyRepo.getHistory()
                 _uiState.value = _uiState.value.copy(cinemaMovies = hist)
-            }
-            else -> {
-                val filtered = RuTrackerCollections.curatedMovies.filter { it.category == category }
-                _uiState.value = _uiState.value.copy(cinemaMovies = filtered)
             }
         }
     }
 
     fun searchCinema(query: String) {
         vibrate(30)
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isCinemaLoading = true)
-            val results = RuTrackerCollections.searchMovies(query)
-            _uiState.value = _uiState.value.copy(
-                cinemaMovies = results,
-                isCinemaLoading = false
-            )
+        val q = query.trim()
+        if (q.startsWith("magnet:?", ignoreCase = true)) {
+            playMagnetUrl(q)
+            return
         }
+        val pool = (historyRepo.getHistory() + historyRepo.getFavorites()).distinctBy { it.id }
+        val results = if (q.isBlank()) {
+            historyRepo.getHistory()
+        } else {
+            val words = q.lowercase().split("\\s+".toRegex()).filter { it.isNotBlank() }
+            pool.filter { m ->
+                val text = "${m.title} ${m.description}".lowercase()
+                words.all { text.contains(it) }
+            }
+        }
+        _uiState.value = _uiState.value.copy(
+            cinemaMovies = results,
+            isCinemaLoading = false,
+            cinemaStatusMessage = if (results.isEmpty() && q.isNotBlank()) {
+                "В истории не найдено. Для поиска новых раздач откройте «Подборки»."
+            } else null
+        )
     }
 
     // Запуск фильма на Станции через TorrServer Silo и ADB
     fun playMovieOnStation(movie: MovieItem) {
         vibrate(60)
+        setAppScreen(AppScreen.CINEMA)
         viewModelScope.launch {
+            val enrichedMagnet = RuTrackerCollections.appendDefaultTrackers(movie.magnetUrl)
+            val targetMovie = movie.copy(magnetUrl = enrichedMagnet)
+
             _uiState.value = _uiState.value.copy(
                 isCinemaLoading = true,
-                lastMessage = "Подготовка «${movie.title}»..."
+                cinemaStatusMessage = "Подготовка «${targetMovie.title}»...",
+                lastMessage = "Подготовка «${targetMovie.title}»..."
             )
-            historyRepo.addToHistory(movie)
+            historyRepo.addToHistory(targetMovie)
+            if (_uiState.value.selectedCinemaCategory == "🕒 История") {
+                _uiState.value = _uiState.value.copy(cinemaMovies = historyRepo.getHistory())
+            }
 
-            // 1. Отправляем в TorrServer Silo на Станции
-            val addResult = torrServerClient.addTorrent(movie.magnetUrl, movie.title)
-            val torrentHash = addResult.getOrNull()
-
-            if (torrentHash.isNullOrBlank()) {
+            // 0. Убеждаемся, что TorrServer запущен на Станции
+            if (!ensureTorrServerRunning(notifyIfStarted = true)) {
+                val errMsg = "TorrServer на Станции (${_uiState.value.ip}) не отвечает"
                 _uiState.value = _uiState.value.copy(
                     isCinemaLoading = false,
-                    lastMessage = "Ошибка TorrServer: ${addResult.exceptionOrNull()?.message}"
+                    cinemaStatusMessage = errMsg,
+                    lastMessage = errMsg
                 )
                 return@launch
             }
 
-            // 2. Пробуждаем торрент в движке и находим точный ID видеофайла
-            _uiState.value = _uiState.value.copy(
-                lastMessage = "Поиск видеофайла в раздаче..."
-            )
-            torrServerClient.wakeTorrent(torrentHash)
-            val bestFileId = torrServerClient.resolveBestVideoFileId(torrentHash, maxWaitSec = 8)
+            // 1. Отправляем в TorrServer Silo на Станции
+            addLog("addTorrent: ${targetMovie.title}")
+            val addResult = torrServerClient.addTorrent(targetMovie.magnetUrl, targetMovie.title)
+            val torrentHash = addResult.getOrNull()
 
-            // 3. Запускаем предзагрузку буфера и крутим прелоадер для стабильного старта
-            _uiState.value = _uiState.value.copy(
-                lastMessage = "Буферизация перед запуском..."
-            )
-            torrServerClient.preloadFile(torrentHash, bestFileId)
-            delay(3500) // Наполнение буфера перед воспроизведением
-
-            // 4. Формируем локальный видеопоток для плеера Станции
-            val streamUrl = torrServerClient.getStreamUrl(torrentHash, bestFileId)
-
-            // 5. Сворачиваем YouTube и запускаем аппаратный плеер Allwinner
-            val adbCmd = "am force-stop org.smarttube.stable; am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\""
-            var adbResult = adbClient.execute(adbCmd)
-
-            if (!adbResult.isSuccess) {
-                val fallbackCmd = "am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\""
-                adbResult = adbClient.execute(fallbackCmd)
-            }
-
-            if (adbResult.isSuccess) {
+            if (torrentHash.isNullOrBlank()) {
+                val errDetail = addResult.exceptionOrNull()?.let { "${it.javaClass.simpleName}: ${it.message}" } ?: "пустой ответ"
+                addLog("addTorrent FAIL: $errDetail")
+                val errMsg = "Ошибка TorrServer: $errDetail"
                 _uiState.value = _uiState.value.copy(
                     isCinemaLoading = false,
-                    activeMoviePlaying = movie.copy(magnetUrl = streamUrl),
-                    lastMessage = "«${movie.title}» запущено на телевизоре!"
+                    cinemaStatusMessage = errMsg,
+                    lastMessage = errMsg
                 )
-            } else {
-                _uiState.value = _uiState.value.copy(
-                    isCinemaLoading = false,
-                    lastMessage = "Ошибка запуска плеера: ${adbResult.exceptionOrNull()?.message}"
-                )
+                return@launch
             }
+            addLog("addTorrent OK: hash=$torrentHash")
+
+            prepareAndPlayTorrent(torrentHash, targetMovie)
         }
     }
 
     fun playMagnetUrl(magnetUrl: String) {
+        val enriched = RuTrackerCollections.appendDefaultTrackers(magnetUrl)
+        val parsedName = RuTrackerCollections.extractDisplayNameFromMagnet(enriched)
+            .ifBlank { "Фильм из Magnet ссылки" }
         val movie = MovieItem(
             id = "magnet_" + System.currentTimeMillis(),
-            title = "Фильм из Magnet ссылки",
+            title = parsedName,
             quality = "HD",
             size = "Онлайн",
             seeds = 100,
-            magnetUrl = magnetUrl,
+            magnetUrl = enriched,
             category = "Вставка",
             description = "Запуск по ссылке"
         )
-        setAppScreen(AppScreen.CINEMA)
         playMovieOnStation(movie)
     }
 
@@ -482,63 +681,306 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         vibrate(50)
         setAppScreen(AppScreen.CINEMA)
         viewModelScope.launch {
+            if (fileBytes.isEmpty()) {
+                showMessage("Выбранный файл пуст")
+                return@launch
+            }
+            val cleanName = fileName.removeSuffix(".torrent").ifBlank { "Торрент-файл" }
             _uiState.value = _uiState.value.copy(
                 isCinemaLoading = true,
+                cinemaStatusMessage = "Запуск TorrServer и загрузка «$cleanName»...",
                 lastMessage = "Загрузка торрент-файла на Станцию..."
             )
-            val uploadResult = torrServerClient.uploadTorrentFile(fileBytes, fileName)
-            val torrentHash = uploadResult.getOrNull()
-
-            if (torrentHash.isNullOrBlank()) {
+            if (!ensureTorrServerRunning(notifyIfStarted = true)) {
+                val errMsg = "TorrServer на Станции (${_uiState.value.ip}) не отвечает"
                 _uiState.value = _uiState.value.copy(
                     isCinemaLoading = false,
-                    lastMessage = "Ошибка загрузки торрента: ${uploadResult.exceptionOrNull()?.message}"
+                    cinemaStatusMessage = errMsg,
+                    lastMessage = errMsg
                 )
                 return@launch
             }
+            addLog("uploadTorrentFile: name=$fileName, size=${fileBytes.size} байт, url=http://${_uiState.value.ip}:${_uiState.value.torrServerPort}/api/torrents")
+            val uploadResult = torrServerClient.uploadTorrentFile(fileBytes, fileName)
+            val uploadedInfo = uploadResult.getOrNull()
+            val torrentHash = uploadedInfo?.hash
 
-            val cleanName = fileName.removeSuffix(".torrent")
-            _uiState.value = _uiState.value.copy(
-                lastMessage = "Кэширование и поиск видеопотока..."
-            )
-            torrServerClient.wakeTorrent(torrentHash)
-            val bestFileId = torrServerClient.resolveBestVideoFileId(torrentHash, maxWaitSec = 8)
-            torrServerClient.preloadFile(torrentHash, bestFileId)
-            delay(3500) // Буферизация перед воспроизведением
+            if (torrentHash.isNullOrBlank()) {
+                val errDetail = uploadResult.exceptionOrNull()?.let { "${it.javaClass.simpleName}: ${it.message}" } ?: "нет ответа"
+                addLog("uploadTorrentFile FAIL: $errDetail")
+                val errMsg = "Ошибка загрузки торрента: $errDetail"
+                _uiState.value = _uiState.value.copy(
+                    isCinemaLoading = false,
+                    cinemaStatusMessage = errMsg,
+                    lastMessage = errMsg
+                )
+                return@launch
+            }
+            addLog("uploadTorrentFile OK: hash=$torrentHash, name=${uploadedInfo.name}")
 
-            val streamUrl = torrServerClient.getStreamUrl(torrentHash, bestFileId)
+            val isForumPageTitle = cleanName.startsWith("rutracker_") ||
+                cleanName.startsWith("movie_") ||
+                cleanName.contains("[стр.", ignoreCase = true) ||
+                cleanName.contains("форум", ignoreCase = true)
+            val displayTitle = if (isForumPageTitle) {
+                uploadedInfo.name.ifBlank { cleanName }
+            } else {
+                cleanName
+            }
+            val sizeText = when {
+                uploadedInfo.sizeBytes >= 1024L * 1024L * 1024L ->
+                    String.format(java.util.Locale.US, "%.2f ГБ", uploadedInfo.sizeBytes / (1024.0 * 1024.0 * 1024.0))
+                uploadedInfo.sizeBytes >= 1024L * 1024L ->
+                    String.format(java.util.Locale.US, "%.0f МБ", uploadedInfo.sizeBytes / (1024.0 * 1024.0))
+                else -> "Файл"
+            }
 
+            val magnetLink = RuTrackerCollections.buildMagnetWithTrackers(torrentHash, displayTitle)
             val movie = MovieItem(
-                id = "torrent_upload_" + System.currentTimeMillis(),
-                title = cleanName,
+                id = "torrent_${torrentHash.lowercase()}",
+                title = displayTitle,
                 quality = "HD",
-                size = "Файл",
+                size = sizeText,
                 seeds = 100,
-                magnetUrl = streamUrl,
+                magnetUrl = magnetLink,
                 category = "Загруженные",
                 description = "Загружено из файла $fileName"
             )
             historyRepo.addToHistory(movie)
 
-            val adbCmd = "am force-stop org.smarttube.stable; am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\""
-            var adbResult = adbClient.execute(adbCmd)
+            _uiState.value = _uiState.value.copy(
+                selectedCinemaCategory = "🕒 История",
+                cinemaMovies = historyRepo.getHistory()
+            )
 
-            if (!adbResult.isSuccess) {
-                adbResult = adbClient.execute("am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\"")
-            }
+            prepareAndPlayTorrent(torrentHash, movie)
+        }
+    }
 
-            if (adbResult.isSuccess) {
-                _uiState.value = _uiState.value.copy(
-                    isCinemaLoading = false,
-                    activeMoviePlaying = movie,
-                    lastMessage = "«$cleanName» запущено на телевизоре!"
+    // Единый умный пайплайн: ожидание списка файлов -> выбор серии (если их несколько) -> реальная буферизация -> запуск плеера
+    private suspend fun prepareAndPlayTorrent(torrentHash: String, movie: MovieItem) {
+        _uiState.value = _uiState.value.copy(
+            isCinemaLoading = true,
+            cinemaStatusMessage = "Ожидание ответа от пиров и списка файлов...",
+            lastMessage = "Поиск файлов раздачи..."
+        )
+        torrServerClient.wakeTorrent(torrentHash)
+        val videoFiles = torrServerClient.waitForVideoFiles(torrentHash, maxWaitSec = 20)
+        addLog("waitForVideoFiles($torrentHash): найдено ${videoFiles.size} файлов")
+
+        if (videoFiles.isEmpty()) {
+            val errMsg = "Нет пиров / раздача не отвечает"
+            _uiState.value = _uiState.value.copy(
+                isCinemaLoading = false,
+                cinemaStatusMessage = errMsg,
+                lastMessage = errMsg
+            )
+            return
+        }
+
+        if (videoFiles.size > 1) {
+            activeSeriesHash = torrentHash
+            activeSeriesMovie = movie
+            activeSeriesFiles = videoFiles
+            val saved = historyRepo.getLastProgressForTorrent(torrentHash)
+            _uiState.value = _uiState.value.copy(
+                isCinemaLoading = false,
+                cinemaStatusMessage = "Найдено серий/файлов: ${videoFiles.size}. Выберите нужный.",
+                pendingEpisodeSelection = PendingEpisodeSelection(
+                    torrentHash = torrentHash,
+                    movie = movie,
+                    files = videoFiles,
+                    lastFileId = saved?.fileId ?: -1,
+                    lastPositionSec = saved?.positionSec ?: 0L
                 )
+            )
+            return
+        }
+
+        activeSeriesHash = torrentHash
+        activeSeriesMovie = movie
+        activeSeriesFiles = videoFiles
+        activeSeriesIndex = 0
+        bufferAndLaunchFile(torrentHash, videoFiles.first(), movie)
+    }
+
+    fun selectEpisodeAndPlay(file: TorrentVideoFile) {
+        val pending = _uiState.value.pendingEpisodeSelection ?: return
+        vibrate(40)
+        activeSeriesHash = pending.torrentHash
+        activeSeriesMovie = pending.movie
+        activeSeriesFiles = pending.files
+        activeSeriesIndex = pending.files.indexOfFirst { it.id == file.id }.coerceAtLeast(0)
+        _uiState.value = _uiState.value.copy(
+            pendingEpisodeSelection = null,
+            isCinemaLoading = true
+        )
+        viewModelScope.launch {
+            bufferAndLaunchFile(pending.torrentHash, file, pending.movie)
+        }
+    }
+
+    fun dismissEpisodeSelection() {
+        _uiState.value = _uiState.value.copy(
+            pendingEpisodeSelection = null,
+            isCinemaLoading = false,
+            cinemaStatusMessage = null
+        )
+    }
+
+    private fun playNextEpisode() {
+        val hash = activeSeriesHash ?: return
+        val movie = activeSeriesMovie ?: return
+        if (activeSeriesIndex + 1 >= activeSeriesFiles.size) {
+            showMessage("Это последняя серия в списке")
+            return
+        }
+        activeSeriesIndex++
+        val nextFile = activeSeriesFiles[activeSeriesIndex]
+        addLog("Автопереключение на следующую серию: ${nextFile.name}")
+        viewModelScope.launch {
+            bufferAndLaunchFile(hash, nextFile, movie)
+        }
+    }
+
+    private fun playPreviousEpisode() {
+        val hash = activeSeriesHash ?: return
+        val movie = activeSeriesMovie ?: return
+        if (activeSeriesIndex - 1 < 0) {
+            showMessage("Это первая серия в списке")
+            return
+        }
+        activeSeriesIndex--
+        val prevFile = activeSeriesFiles[activeSeriesIndex]
+        addLog("Переключение на предыдущую серию: ${prevFile.name}")
+        viewModelScope.launch {
+            bufferAndLaunchFile(hash, prevFile, movie)
+        }
+    }
+
+    private fun stopPlaybackMonitor() {
+        playbackMonitorJob?.cancel()
+        playbackMonitorJob = null
+    }
+
+    private fun startPlaybackMonitor(torrentHash: String, file: TorrentVideoFile, movie: MovieItem) {
+        stopPlaybackMonitor()
+        playbackMonitorJob = viewModelScope.launch {
+            var checks = 0
+            while (true) {
+                delay(5000)
+                if (!isPlaybackPaused) {
+                    activePositionSec += 5L
+                    _uiState.value = _uiState.value.copy(activePlaybackSec = activePositionSec)
+                    historyRepo.savePlaybackProgress(torrentHash, file.id, file.name, activePositionSec)
+                }
+                checks++
+                // Каждые 10 сек (после 30 сек просмотра) проверяем, не завершилась ли серия в плеере
+                if (checks % 2 == 0 && checks >= 6 && activeSeriesFiles.size > 1 && !isPlaybackPaused) {
+                    val psRes = adbClient.execute("ps | grep -iE \"fireplayer|vlc\"")
+                    val running = psRes.getOrNull().orEmpty()
+                    if (psRes.isSuccess && !running.contains("fireplayer") && !running.contains("vlc")) {
+                        addLog("Плеер завершил серию ${file.name}")
+                        if (activeSeriesIndex + 1 < activeSeriesFiles.size) {
+                            playNextEpisode()
+                        } else {
+                            stopPlaybackMonitor()
+                        }
+                        break
+                    }
+                }
+            }
+        }
+    }
+
+    private fun formatSeconds(totalSec: Long): String {
+        val h = totalSec / 3600
+        val m = (totalSec % 3600) / 60
+        val s = totalSec % 60
+        return if (h > 0) String.format(java.util.Locale.US, "%d:%02d:%02d", h, m, s)
+        else String.format(java.util.Locale.US, "%02d:%02d", m, s)
+    }
+
+    private suspend fun bufferAndLaunchFile(torrentHash: String, file: TorrentVideoFile, movie: MovieItem) {
+        stopPlaybackMonitor()
+        val minBufferBytes = 1536 * 1024L // 1.5 МБ
+        _uiState.value = _uiState.value.copy(
+            isCinemaLoading = true,
+            cinemaStatusMessage = "Буферизация «${file.name}»: 0.0 / 1.5 МБ..."
+        )
+        torrServerClient.preloadFile(torrentHash, file.id)
+
+        val filled = torrServerClient.waitForBuffer(
+            torrentHash = torrentHash,
+            minBytes = minBufferBytes,
+            maxWaitMs = 22000L
+        ) { currentBytes ->
+            val mb = String.format(java.util.Locale.US, "%.1f", currentBytes / (1024.0 * 1024.0))
+            _uiState.value = _uiState.value.copy(
+                cinemaStatusMessage = "Буферизация «${file.name}»: $mb / 1.5 МБ..."
+            )
+        }
+
+        if (filled < 512 * 1024L) {
+            addLog("waitForBuffer FAIL: filled=$filled байт")
+            val errMsg = "Не удалось набрать буфер (нет пиров)"
+            _uiState.value = _uiState.value.copy(
+                isCinemaLoading = false,
+                cinemaStatusMessage = errMsg,
+                lastMessage = errMsg
+            )
+            return
+        }
+        addLog("waitForBuffer OK: filled=$filled байт, запуск ADB...")
+
+        val savedPosSec = historyRepo.getFilePositionSec(torrentHash, file.id)
+        val posExtra = if (savedPosSec > 15L) "--ei position ${savedPosSec * 1000L} " else ""
+        val streamUrl = torrServerClient.getStreamUrl(torrentHash, file.id)
+        // Запускаем VLC (если установлен, чтобы работали все аудиодорожки AC3/DTS), иначе штатный fireplayer
+        val adbCmd = "am force-stop org.smarttube.stable; am force-stop org.videolan.vlc; am force-stop com.softwinner.fireplayer; " +
+            "(svc power stayon true; settings put secure screensaver_enabled 0; input keyevent 224) >/dev/null 2>&1 & " +
+            "if pm path org.videolan.vlc >/dev/null 2>&1; then " +
+            "am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" -p org.videolan.vlc $posExtra; " +
+            "else am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" $posExtra; fi"
+        var adbResult = adbClient.execute(adbCmd)
+
+        if (!adbResult.isSuccess) {
+            adbResult = adbClient.execute("am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\"")
+        }
+
+        if (adbResult.isSuccess) {
+            val out = adbResult.getOrNull().orEmpty()
+            addLog("ADB launch OK: ${file.name} (${out.take(80)})")
+            activePositionSec = savedPosSec
+            isPlaybackPaused = false
+            historyRepo.savePlaybackProgress(torrentHash, file.id, file.name, savedPosSec)
+            val updatedMovie = movie.copy(
+                description = if (savedPosSec > 15L) "Продолжить с ${formatSeconds(savedPosSec)} • ${file.name}" else file.name
+            )
+            historyRepo.addToHistory(updatedMovie)
+
+            val okMsg = if (savedPosSec > 15L) {
+                "«${file.name}» запущено (с ${formatSeconds(savedPosSec)})!"
             } else {
-                _uiState.value = _uiState.value.copy(
-                    isCinemaLoading = false,
-                    lastMessage = "Ошибка запуска плеера: ${adbResult.exceptionOrNull()?.message}"
-                )
+                "«${file.name}» запущено на телевизоре!"
             }
+            _uiState.value = _uiState.value.copy(
+                isCinemaLoading = false,
+                activeMoviePlaying = updatedMovie.copy(title = file.name, magnetUrl = streamUrl),
+                cinemaMovies = if (_uiState.value.selectedCinemaCategory == "🕒 История") historyRepo.getHistory() else _uiState.value.cinemaMovies,
+                cinemaStatusMessage = okMsg,
+                lastMessage = okMsg
+            )
+            startPlaybackMonitor(torrentHash, file, movie)
+        } else {
+            val adbErr = adbResult.exceptionOrNull()?.message ?: "неизвестно"
+            addLog("ADB launch FAIL: $adbErr")
+            val errMsg = "Ошибка запуска плеера: $adbErr"
+            _uiState.value = _uiState.value.copy(
+                isCinemaLoading = false,
+                cinemaStatusMessage = errMsg,
+                lastMessage = errMsg
+            )
         }
     }
 

@@ -12,10 +12,46 @@ class HistoryRepository(context: Context) {
     companion object {
         private const val KEY_HISTORY = "history_list"
         private const val KEY_FAVORITES = "favorites_list"
+        private const val KEY_PROGRESS_PREFIX = "progress_"
+        private const val KEY_LAST_FILE_PREFIX = "last_file_"
+    }
+
+    data class SavedProgress(
+        val fileId: Int,
+        val fileName: String,
+        val positionSec: Long
+    )
+
+    fun savePlaybackProgress(torrentHash: String, fileId: Int, fileName: String, positionSec: Long) {
+        val h = torrentHash.lowercase()
+        prefs.edit()
+            .putLong("${KEY_PROGRESS_PREFIX}${h}_$fileId", positionSec)
+            .putInt("${KEY_LAST_FILE_PREFIX}$h", fileId)
+            .putString("${KEY_LAST_FILE_PREFIX}${h}_name", fileName)
+            .apply()
+    }
+
+    fun getFilePositionSec(torrentHash: String, fileId: Int): Long {
+        return prefs.getLong("${KEY_PROGRESS_PREFIX}${torrentHash.lowercase()}_$fileId", 0L)
+    }
+
+    fun getLastProgressForTorrent(torrentHash: String): SavedProgress? {
+        val h = torrentHash.lowercase()
+        val fileId = prefs.getInt("${KEY_LAST_FILE_PREFIX}$h", -1)
+        if (fileId < 0) return null
+        val fileName = prefs.getString("${KEY_LAST_FILE_PREFIX}${h}_name", "") ?: ""
+        val pos = prefs.getLong("${KEY_PROGRESS_PREFIX}${h}_$fileId", 0L)
+        return SavedProgress(fileId = fileId, fileName = fileName, positionSec = pos)
+    }
+
+    private fun isLegacyCurated(id: String): Boolean {
+        return id.startsWith("nov_") || id.startsWith("top_") ||
+            id.startsWith("ser_") || id.startsWith("cls_") ||
+            id.startsWith("search_help_")
     }
 
     fun getHistory(): List<MovieItem> {
-        return readList(KEY_HISTORY)
+        return readList(KEY_HISTORY).filterNot { isLegacyCurated(it.id) }
     }
 
     fun addToHistory(movie: MovieItem) {

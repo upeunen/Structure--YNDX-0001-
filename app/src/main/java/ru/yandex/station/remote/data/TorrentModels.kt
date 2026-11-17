@@ -17,3 +17,18 @@ data class TorrServerAddResponse(
     val hash: String? = null,
     val error: String? = null
 )
+
+data class TorrentVideoFile(
+    val id: Int,
+    val name: String,
+    val path: String,
+    val sizeBytes: Long
+)
+
+data class PendingEpisodeSelection(
+    val torrentHash: String,
+    val movie: MovieItem,
+    val files: List<TorrentVideoFile>,
+    val lastFileId: Int = -1,
+    val lastPositionSec: Long = 0L
+)

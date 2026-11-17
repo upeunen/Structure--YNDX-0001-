@@ -60,9 +60,10 @@ class TorrServerClient(
 
     // Проверка заполненности кэша (в байтах)
     suspend fun getCacheFilled(torrentHash: String): Long = withContext(Dispatchers.IO) {
+        var conn: HttpURLConnection? = null
         try {
             val url = URL("$baseUrl/api/torrents/$torrentHash/cache")
-            val conn = (url.openConnection() as HttpURLConnection).apply {
+            conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = 2000
                 readTimeout = 2000
@@ -76,6 +77,8 @@ class TorrServerClient(
             }
         } catch (_: Exception) {
             0L
+        } finally {
+            try { conn?.disconnect() } catch (_: Exception) {}
         }
     }
 
@@ -131,25 +134,25 @@ class TorrServerClient(
         }
     }
 
-    // Загрузка локального .torrent файла в TorrServer Silo
-    suspend fun uploadTorrentFile(fileBytes: ByteArray, fileName: String = "movie.torrent"): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val boundary = "====" + System.currentTimeMillis() + "===="
-            val url = URL("$baseUrl/api/torrents")
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = timeoutMs
-                readTimeout = timeoutMs
-                doOutput = true
-                setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
-            }
+    data class UploadedTorrentInfo(
+        val hash: String,
+        val name: String,
+        val sizeBytes: Long
+    )
 
-            val cleanTitle = fileName.removeSuffix(".torrent")
+    // Загрузка локального .torrent файла в TorrServer Silo
+    suspend fun uploadTorrentFile(fileBytes: ByteArray, fileName: String = "movie.torrent"): Result<UploadedTorrentInfo> = withContext(Dispatchers.IO) {
+        var conn: HttpURLConnection? = null
+        try {
+            // Важно: boundary только из букв/цифр без '=', иначе строгий HTTP-парсер сбрасывает соединение
+            val boundary = "TorrBoundary" + System.currentTimeMillis()
+            val cleanTitle = fileName.removeSuffix(".torrent").ifBlank { "Фильм" }
+            val safeFileName = "upload.torrent"
             val byteStream = ByteArrayOutputStream()
 
             // 1. Поле file (.torrent)
             byteStream.write(("--$boundary\r\n").toByteArray(StandardCharsets.UTF_8))
-            byteStream.write(("Content-Disposition: form-data; name=\"file\"; filename=\"$fileName\"\r\n").toByteArray(StandardCharsets.UTF_8))
+            byteStream.write(("Content-Disposition: form-data; name=\"file\"; filename=\"$safeFileName\"\r\n").toByteArray(StandardCharsets.UTF_8))
             byteStream.write(("Content-Type: application/x-bittorrent\r\n\r\n").toByteArray(StandardCharsets.UTF_8))
             byteStream.write(fileBytes)
             byteStream.write(("\r\n").toByteArray(StandardCharsets.UTF_8))
@@ -165,37 +168,61 @@ class TorrServerClient(
             byteStream.write(("true\r\n").toByteArray(StandardCharsets.UTF_8))
 
             byteStream.write(("--$boundary--\r\n").toByteArray(StandardCharsets.UTF_8))
+            val payload = byteStream.toByteArray()
+
+            val url = URL("$baseUrl/api/torrents")
+            conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = timeoutMs
+                readTimeout = 15000
+                doOutput = true
+                setFixedLengthStreamingMode(payload.size)
+                setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            }
 
             conn.outputStream.use { os ->
-                os.write(byteStream.toByteArray())
+                os.write(payload)
                 os.flush()
             }
 
             val responseCode = conn.responseCode
             val stream = if (responseCode in 200..299) conn.inputStream else conn.errorStream
             val responseText = stream?.bufferedReader()?.use { it.readText() } ?: ""
+            conn.disconnect()
 
-            val json = JSONObject(responseText)
-            val hash = json.optString("hash").ifEmpty { json.optString("Hash") }
+            val json = try {
+                JSONObject(responseText)
+            } catch (_: Exception) {
+                null
+            }
+            val hash = json?.optString("hash")?.ifEmpty { json.optString("Hash") } ?: ""
             if (hash.isNotEmpty()) {
-                Result.success(hash)
+                val torrentName = json?.optString("name")?.takeIf { it.isNotBlank() }
+                    ?: json?.optString("title")?.takeIf { it.isNotBlank() }
+                    ?: cleanTitle
+                val sizeBytes = json?.optLong("torrent_size", 0L) ?: 0L
+                Result.success(UploadedTorrentInfo(hash = hash, name = torrentName, sizeBytes = sizeBytes))
             } else {
-                Result.failure(Exception("Сервер вернул код $responseCode: $responseText"))
+                val apiError = json?.optString("error")?.takeIf { it.isNotBlank() }
+                Result.failure(Exception(apiError ?: "Сервер вернул код $responseCode: $responseText"))
             }
         } catch (e: Exception) {
             Result.failure(e)
+        } finally {
+            try { conn?.disconnect() } catch (_: Exception) {}
         }
     }
 
-    // Ожидание метаданных и поиск ID главного видеофайла в торренте
-    suspend fun resolveBestVideoFileId(torrentHash: String, maxWaitSec: Int = 12): Int = withContext(Dispatchers.IO) {
+    // Ожидание метаданных и получение списка видеофайлов в раздаче
+    suspend fun waitForVideoFiles(torrentHash: String, maxWaitSec: Int = 20): List<TorrentVideoFile> = withContext(Dispatchers.IO) {
         val videoExtensions = listOf(".mp4", ".mkv", ".avi", ".ts", ".mov", ".m2ts", ".webm", ".flv", ".vob", ".wmv")
         val startTime = System.currentTimeMillis()
 
         while (System.currentTimeMillis() - startTime < maxWaitSec * 1000L) {
+            var conn: HttpURLConnection? = null
             try {
                 val url = URL("$baseUrl/api/torrents")
-                val conn = (url.openConnection() as HttpURLConnection).apply {
+                conn = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
                     connectTimeout = 3000
                     readTimeout = 3000
@@ -213,53 +240,83 @@ class TorrServerClient(
                             if (h.equals(torrentHash, ignoreCase = true)) {
                                 val fileStats = tObj.optJSONArray("file_stats")
                                 if (fileStats != null && fileStats.length() > 0) {
-                                    var bestId = 0
-                                    var maxLength = -1L
+                                    val videoFiles = mutableListOf<TorrentVideoFile>()
+                                    val largeFallback = mutableListOf<TorrentVideoFile>()
 
                                     for (j in 0 until fileStats.length()) {
                                         val fObj = fileStats.getJSONObject(j)
                                         val id = fObj.optInt("id", j)
-                                        val path = (fObj.optString("path") + " " + fObj.optString("name")).lowercase()
+                                        val path = fObj.optString("path").ifBlank { fObj.optString("name") }
+                                        val name = fObj.optString("name").ifBlank { path.substringAfterLast('/') }
                                         val length = fObj.optLong("length", 0L)
 
-                                        val isVideo = videoExtensions.any { ext -> path.contains(ext) }
+                                        val lower = "$path $name".lowercase()
+                                        val isVideo = videoExtensions.any { ext -> lower.contains(ext) }
+                                        val item = TorrentVideoFile(id = id, name = name, path = path, sizeBytes = length)
                                         if (isVideo) {
-                                            if (length > maxLength) {
-                                                maxLength = length
-                                                bestId = id
-                                            }
+                                            videoFiles.add(item)
+                                        } else if (length > 50 * 1024 * 1024L) {
+                                            largeFallback.add(item)
                                         }
                                     }
 
-                                    if (maxLength > 0L) {
-                                        return@withContext bestId
-                                    }
-
-                                    // Если расширения не указаны, берем файл с максимальным размером (> 50 МБ)
-                                    for (j in 0 until fileStats.length()) {
-                                        val fObj = fileStats.getJSONObject(j)
-                                        val id = fObj.optInt("id", j)
-                                        val length = fObj.optLong("length", 0L)
-                                        if (length > maxLength && length > 50 * 1024 * 1024L) {
-                                            maxLength = length
-                                            bestId = id
-                                        }
-                                    }
-
-                                    if (maxLength > 0L) {
-                                        return@withContext bestId
+                                    val resultList = (videoFiles.ifEmpty { largeFallback }).sortedBy { it.path.lowercase() }
+                                    if (resultList.isNotEmpty()) {
+                                        return@withContext resultList
                                     }
                                 }
                             }
                         }
                     }
                 }
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+            } finally {
+                try { conn?.disconnect() } catch (_: Exception) {}
+            }
 
-            delay(1500)
+            delay(1200)
         }
 
-        // Если метаданные еще не готовы или только 1 файл, возвращаем 0
-        0
+        emptyList()
+    }
+
+    // Проверка доступности TorrServer на порту 8090
+    suspend fun isServerRunning(): Boolean = withContext(Dispatchers.IO) {
+        var conn: HttpURLConnection? = null
+        try {
+            val url = URL("$baseUrl/api/torrents")
+            conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 1500
+                readTimeout = 1500
+            }
+            conn.responseCode in 200..299
+        } catch (_: Exception) {
+            false
+        } finally {
+            try {
+                conn?.disconnect()
+            } catch (_: Exception) {}
+        }
+    }
+
+    // Ожидание реального наполнения стартового буфера перед запуском видеоплеера
+    suspend fun waitForBuffer(
+        torrentHash: String,
+        minBytes: Long = 1536 * 1024L,
+        maxWaitMs: Long = 22000L,
+        onProgress: (Long) -> Unit = {}
+    ): Long {
+        val startTime = System.currentTimeMillis()
+        var filled = 0L
+        while (System.currentTimeMillis() - startTime < maxWaitMs) {
+            filled = getCacheFilled(torrentHash)
+            onProgress(filled)
+            if (filled >= minBytes) {
+                return filled
+            }
+            delay(600)
+        }
+        return filled
     }
 }

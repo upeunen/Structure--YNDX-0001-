@@ -43,79 +43,89 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun RemoteScreen(
     viewModel: RemoteViewModel,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onDismiss: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val context = LocalContext.current
     val scrollState = rememberScrollState()
 
-    Scaffold(
-        containerColor = OledBlack,
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = "Яндекс.Станция",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(top = 2.dp)
-                        ) {
-                            val (dotColor, statusText) = when (uiState.connectionStatus) {
-                                StationConnectionStatus.CONNECTED -> StatusGreen to "На связи (${uiState.ip})"
-                                StationConnectionStatus.CHECKING -> AccentYandex to "Проверка связи..."
-                                StationConnectionStatus.UNAVAILABLE -> StatusRed to "Не в сети (${uiState.ip})"
-                                StationConnectionStatus.IDLE -> TextSecondary to uiState.ip
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(dotColor)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = statusText,
-                                fontSize = 12.sp,
-                                color = TextSecondary
-                            )
-                        }
-                    }
-                },
-                actions = {
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = "Настройки",
-                            tint = TextPrimary
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = OledBlack
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(OledBlack)
+    ) {
+        // Шапка модального пульта
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(DarkSurface)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Пульт",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
                 )
-            )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 2.dp)
+                ) {
+                    val (dotColor, statusText) = when (uiState.connectionStatus) {
+                        StationConnectionStatus.CONNECTED -> StatusGreen to "На связи (${uiState.ip})"
+                        StationConnectionStatus.CHECKING -> AccentYandex to "Проверка связи..."
+                        StationConnectionStatus.UNAVAILABLE -> StatusRed to "Не в сети (${uiState.ip})"
+                        StationConnectionStatus.IDLE -> TextSecondary to uiState.ip
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(dotColor)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = statusText,
+                        fontSize = 12.sp,
+                        color = TextSecondary
+                    )
+                }
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onOpenSettings) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Настройки",
+                        tint = TextPrimary
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Закрыть пульт",
+                        tint = TextPrimary
+                    )
+                }
+            }
         }
-    ) { innerPadding ->
+
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
+                .fillMaxWidth()
                 .verticalScroll(scrollState)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Переключатель режима: Кнопки / Мышь-тачпад / Клавиатура & RuTracker
+            // Переключатель режима: Кнопки / Клавиатура & RuTracker
             TabRow(
                 selectedTabIndex = when (uiState.activeTab) {
                     RemoteTab.REMOTE -> 0
-                    RemoteTab.TOUCHPAD -> 1
-                    RemoteTab.KEYBOARD -> 2
+                    RemoteTab.KEYBOARD -> 1
                 },
                 containerColor = DarkSurface,
                 contentColor = AccentYandex,
@@ -145,24 +155,6 @@ fun RemoteScreen(
                 }
 
                 Tab(
-                    selected = uiState.activeTab == RemoteTab.TOUCHPAD,
-                    onClick = { viewModel.setActiveTab(RemoteTab.TOUCHPAD) },
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(
-                            if (uiState.activeTab == RemoteTab.TOUCHPAD) DarkSurfaceElevated else Color.Transparent
-                        )
-                        .padding(vertical = 10.dp)
-                ) {
-                    Text(
-                        text = "Мышь-пад",
-                        fontWeight = if (uiState.activeTab == RemoteTab.TOUCHPAD) FontWeight.Bold else FontWeight.Normal,
-                        color = if (uiState.activeTab == RemoteTab.TOUCHPAD) TextPrimary else TextSecondary,
-                        fontSize = 13.sp
-                    )
-                }
-
-                Tab(
                     selected = uiState.activeTab == RemoteTab.KEYBOARD,
                     onClick = { viewModel.setActiveTab(RemoteTab.KEYBOARD) },
                     modifier = Modifier
@@ -173,58 +165,11 @@ fun RemoteScreen(
                         .padding(vertical = 10.dp)
                 ) {
                     Text(
-                        text = "Ввод & RuTracker",
+                        text = "Ввод текста",
                         fontWeight = if (uiState.activeTab == RemoteTab.KEYBOARD) FontWeight.Bold else FontWeight.Normal,
                         color = if (uiState.activeTab == RemoteTab.KEYBOARD) TextPrimary else TextSecondary,
                         fontSize = 13.sp
                     )
-                }
-            }
-
-            // Быстрые режимы в 1 касание
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Text(
-                        text = "БЫСТРЫЕ РЕЖИМЫ",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextSecondary,
-                        letterSpacing = 1.sp,
-                        modifier = Modifier.padding(bottom = 10.dp)
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        QuickModeButton(
-                            title = "YouTube",
-                            subtitle = "SmartTube",
-                            icon = Icons.Default.PlayCircle,
-                            accentColor = AccentRed,
-                            modifier = Modifier.weight(1f),
-                            onClick = { viewModel.setAppScreen(AppScreen.YOUTUBE) }
-                        )
-                        QuickModeButton(
-                            title = "🎬 Кинозал",
-                            subtitle = "Торренты",
-                            icon = Icons.Default.Movie,
-                            accentColor = AccentBlue,
-                            modifier = Modifier.weight(1f),
-                            onClick = { viewModel.setAppScreen(AppScreen.CINEMA) }
-                        )
-                        QuickModeButton(
-                            title = "🏠 Алиса",
-                            subtitle = "Часы / Главная",
-                            icon = Icons.Default.Home,
-                            accentColor = AccentYandex,
-                            modifier = Modifier.weight(1f),
-                            onClick = { viewModel.launchAlice() }
-                        )
-                    }
                 }
             }
 
@@ -239,37 +184,20 @@ fun RemoteScreen(
                         onOk = { viewModel.sendKeyEvent(66) }
                     )
                 }
-                RemoteTab.TOUCHPAD -> {
-                    TouchpadPad(
-                        cursorX = uiState.cursorX,
-                        cursorY = uiState.cursorY,
-                        onMove = { dx, dy -> viewModel.onTouchpadDrag(dx, dy) },
-                        onDragEnd = { viewModel.onTouchpadDragEnd() },
-                        onDoubleClick = { viewModel.clickAtCursor() },
-                        onScrollUp = { viewModel.scroll(true) },
-                        onScrollDown = { viewModel.scroll(false) }
-                    )
-                }
                 RemoteTab.KEYBOARD -> {
                     RuTrackerAndKeyboardCard(
-                        savedLogin = uiState.rutrackerLogin,
-                        savedPass = uiState.rutrackerPass,
                         keyboardInput = uiState.keyboardInput,
                         onKeyboardInputChange = { viewModel.setKeyboardInput(it) },
                         onSendText = { viewModel.sendText(it) },
-                        onSaveCredentials = { login, pass ->
-                            viewModel.setRuTrackerCredentials(login, pass)
-                        },
-                        onAutoFillRuTracker = { login, pass ->
-                            viewModel.autoFillRuTracker(login, pass)
-                        },
                         onSendKeyEvent = { viewModel.sendKeyEvent(it) }
                     )
                 }
             }
 
-            // Плеер воспроизведения YouTube / ТВ (Play, Pause, Перемотка, Громкость)
+            // Плеер воспроизведения ТВ (Play, Pause, Плавная перемотка, Громкость, Меню, Дорожка, Субтитры)
             MediaPlaybackCard(
+                playbackSec = uiState.activePlaybackSec,
+                onSeekRelative = { viewModel.seekRelativeSeconds(it) },
                 onPlayPause = { viewModel.mediaPlayPause() },
                 onRewind = { viewModel.mediaRewind() },
                 onFastForward = { viewModel.mediaFastForward() },
@@ -278,257 +206,28 @@ fun RemoteScreen(
                 onVolumeDown = { viewModel.sendKeyEvent(25) },
                 onVolumeUp = { viewModel.sendKeyEvent(24) },
                 onVolumeMute = { viewModel.volumeMute() },
-                onBack = { viewModel.sendKeyEvent(4) }
+                onBack = { viewModel.sendKeyEvent(4) },
+                onMenu = { viewModel.sendKeyEvent(82) },
+                onAudioTrack = { viewModel.sendKeyEvent(30) },
+                onSubtitles = { viewModel.sendKeyEvent(50) }
             )
 
-            // Блок отправки YouTube ссылок
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        text = "ЗАПУСК YOUTUBE ВИДЕО НА ТВ",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextSecondary,
-                        letterSpacing = 1.sp
-                    )
-
-                    OutlinedTextField(
-                        value = uiState.youtubeUrlInput,
-                        onValueChange = { viewModel.setYoutubeUrlInput(it) },
-                        placeholder = {
-                            Text(
-                                "Вставьте ссылку на YouTube видео...",
-                                color = TextSecondary,
-                                fontSize = 14.sp
-                            )
-                        },
-                        trailingIcon = {
-                            if (uiState.youtubeUrlInput.isNotEmpty()) {
-                                IconButton(onClick = { viewModel.setYoutubeUrlInput("") }) {
-                                    Icon(
-                                        Icons.Default.Clear,
-                                        contentDescription = "Очистить",
-                                        tint = TextSecondary
-                                    )
-                                }
-                            }
-                        },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentYandex,
-                            unfocusedBorderColor = DarkSurfaceElevated,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
-                            cursorColor = AccentYandex
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clip = clipboard.primaryClip
-                                if (clip != null && clip.itemCount > 0) {
-                                    val text = clip.getItemAt(0).text?.toString() ?: ""
-                                    viewModel.setYoutubeUrlInput(text)
-                                    viewModel.vibrate(20)
-                                }
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = TextPrimary
-                            ),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(
-                                Icons.Default.ContentPaste,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Из буфера", fontSize = 13.sp)
-                        }
-
-                        Button(
-                            onClick = {
-                                viewModel.sendYouTubeUrl(uiState.youtubeUrlInput)
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = AccentRed,
-                                contentColor = Color.White
-                            ),
-                            modifier = Modifier.weight(1.3f)
-                        ) {
-                            Icon(
-                                Icons.Default.Tv,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                "Смотреть на ТВ",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 }
 
 @Composable
 fun RuTrackerAndKeyboardCard(
-    savedLogin: String,
-    savedPass: String,
     keyboardInput: String,
     onKeyboardInputChange: (String) -> Unit,
     onSendText: (String) -> Unit,
-    onSaveCredentials: (String, String) -> Unit,
-    onAutoFillRuTracker: (String, String) -> Unit,
     onSendKeyEvent: (Int) -> Unit
 ) {
-    var login by remember { mutableStateOf(savedLogin) }
-    var password by remember { mutableStateOf(savedPass) }
-    var passwordVisible by remember { mutableStateOf(false) }
-
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Блок RuTracker
-        Card(
-            colors = CardDefaults.cardColors(containerColor = DarkSurface),
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text = "ВХОД RUTRACKER & KODI",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextSecondary,
-                    letterSpacing = 1.sp
-                )
-
-                OutlinedTextField(
-                    value = login,
-                    onValueChange = { login = it },
-                    label = { Text("Логин / Никнейм", color = TextSecondary) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentYandex,
-                        unfocusedBorderColor = DarkSurfaceElevated,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        cursorColor = AccentYandex
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("Пароль", color = TextSecondary) },
-                    singleLine = true,
-                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    trailingIcon = {
-                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                            Icon(
-                                if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                contentDescription = null,
-                                tint = TextSecondary
-                            )
-                        }
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentYandex,
-                        unfocusedBorderColor = DarkSurfaceElevated,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        cursorColor = AccentYandex
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                // Большая кнопка авто-ввода в форму
-                Button(
-                    onClick = {
-                        onSaveCredentials(login, password)
-                        onAutoFillRuTracker(login, password)
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AccentYandex,
-                        contentColor = Color.Black
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.Login, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        "Авто-ввод (Логин ➔ Tab ➔ Пароль ➔ Вход)",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = { onSendText(login) },
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Только логин", fontSize = 11.sp)
-                    }
-
-                    OutlinedButton(
-                        onClick = { onSendKeyEvent(61) }, // TAB
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-                        modifier = Modifier.weight(0.7f)
-                    ) {
-                        Text("Tab ⇥", fontSize = 11.sp)
-                    }
-
-                    OutlinedButton(
-                        onClick = { onSendText(password) },
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Только пароль", fontSize = 11.sp)
-                    }
-                }
-            }
-        }
-
         // Блок свободной клавиатуры смартфона для ТВ
         Card(
             colors = CardDefaults.cardColors(containerColor = DarkSurface),
@@ -609,6 +308,8 @@ fun RuTrackerAndKeyboardCard(
 
 @Composable
 fun MediaPlaybackCard(
+    playbackSec: Long,
+    onSeekRelative: (Long) -> Unit,
     onPlayPause: () -> Unit,
     onRewind: () -> Unit,
     onFastForward: () -> Unit,
@@ -617,8 +318,15 @@ fun MediaPlaybackCard(
     onVolumeDown: () -> Unit,
     onVolumeUp: () -> Unit,
     onVolumeMute: () -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onMenu: () -> Unit,
+    onAudioTrack: () -> Unit,
+    onSubtitles: () -> Unit
 ) {
+    val mins = playbackSec / 60
+    val secs = playbackSec % 60
+    val timeLabel = String.format(java.util.Locale.US, "%02d:%02d", mins, secs)
+
     Card(
         colors = CardDefaults.cardColors(containerColor = DarkSurface),
         shape = RoundedCornerShape(16.dp),
@@ -626,15 +334,49 @@ fun MediaPlaybackCard(
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(
-                text = "ПЛЕЕР ВОСПРОИЗВЕДЕНИЯ YOUTUBE / ТВ",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextSecondary,
-                letterSpacing = 1.sp
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "ПЛЕЕР ВОСПРОИЗВЕДЕНИЯ",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextSecondary,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = timeLabel,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = AccentYandex
+                )
+            }
+
+            // Плавные кнопки перемотки без перегрузки Станции
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                listOf(
+                    -60L to "−1 мин",
+                    -10L to "−10 сек",
+                    10L to "+10 сек",
+                    60L to "+1 мин"
+                ).forEach { (delta, label) ->
+                    OutlinedButton(
+                        onClick = { onSeekRelative(delta) },
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(label, fontSize = 11.sp, color = TextPrimary, maxLines = 1)
+                    }
+                }
+            }
 
             // Основная строка управления плеером: Пред, Перемотка назад, Play/Pause, Перемотка вперед, След
             Row(
@@ -699,12 +441,17 @@ fun MediaPlaybackCard(
                 }
             }
 
-            // Дополнительная строка: Назад, Громкость -, Mute, Громкость +
+            // Дополнительная строка: Меню, Назад, Громкость -, Mute, Громкость +
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                CircleActionButton(
+                    icon = Icons.Default.Menu,
+                    label = "Меню",
+                    onClick = onMenu
+                )
                 CircleActionButton(
                     icon = Icons.AutoMirrored.Filled.ArrowBack,
                     label = "Назад",
@@ -726,179 +473,29 @@ fun MediaPlaybackCard(
                     onClick = onVolumeUp
                 )
             }
-        }
-    }
-}
 
-@Composable
-fun TouchpadPad(
-    cursorX: Float,
-    cursorY: Float,
-    onMove: (dx: Float, dy: Float) -> Unit,
-    onDragEnd: () -> Unit,
-    onDoubleClick: () -> Unit,
-    onScrollUp: () -> Unit,
-    onScrollDown: () -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        // Сенсорная область тачпада
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(260.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(DarkSurface)
-                .border(2.dp, DarkSurfaceElevated, RoundedCornerShape(20.dp))
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onDoubleTap = {
-                            onDoubleClick()
-                        },
-                        onTap = {
-                            onDoubleClick()
-                        }
-                    )
+            // Быстрые кнопки VLC: Звуковая дорожка и Субтитры
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onAudioTrack,
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("🔊 Аудиодорожка", fontSize = 12.sp, color = TextPrimary, maxLines = 1)
                 }
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragEnd = { onDragEnd() },
-                        onDragCancel = { onDragEnd() },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            onMove(dragAmount.x, dragAmount.y)
-                        }
-                    )
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-                val padWidth = size.width
-                val padHeight = size.height
-
-                val gridColor = Color(0xFF232328)
-                drawLine(gridColor, Offset(padWidth / 2, 0f), Offset(padWidth / 2, padHeight), strokeWidth = 1f)
-                drawLine(gridColor, Offset(0f, padHeight / 2), Offset(padWidth, padHeight / 2), strokeWidth = 1f)
-
-                val pointX = (cursorX / 1920f) * padWidth
-                val pointY = (cursorY / 1080f) * padHeight
-
-                drawCircle(
-                    color = AccentYandex.copy(alpha = 0.35f),
-                    radius = 18f,
-                    center = Offset(pointX, pointY)
-                )
-                drawCircle(
-                    color = AccentYandex,
-                    radius = 7f,
-                    center = Offset(pointX, pointY)
-                )
+                OutlinedButton(
+                    onClick = onSubtitles,
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("💬 Субтитры", fontSize = 12.sp, color = TextPrimary, maxLines = 1)
+                }
             }
-
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-                modifier = Modifier.padding(16.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.TouchApp,
-                    contentDescription = null,
-                    tint = TextSecondary.copy(alpha = 0.35f),
-                    modifier = Modifier.size(36.dp)
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "ДВОЙНОЕ НАЖАТИЕ — КЛИК",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextSecondary.copy(alpha = 0.5f),
-                    letterSpacing = 1.sp
-                )
-            }
-        }
-
-        // Вспомогательные быстрые кнопки мыши
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Button(
-                onClick = onDoubleClick,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AccentYandex,
-                    contentColor = Color.Black
-                ),
-                modifier = Modifier.weight(1.5f)
-            ) {
-                Icon(Icons.Default.Mouse, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Клик мыши", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            }
-
-            OutlinedButton(
-                onClick = onScrollUp,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-                modifier = Modifier.weight(1f)
-            ) {
-                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Вверх")
-                Text("Скролл", fontSize = 12.sp)
-            }
-
-            OutlinedButton(
-                onClick = onScrollDown,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-                modifier = Modifier.weight(1f)
-            ) {
-                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Вниз")
-                Text("Скролл", fontSize = 12.sp)
-            }
-        }
-    }
-}
-
-@Composable
-fun QuickModeButton(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    accentColor: Color,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        color = DarkSurfaceElevated,
-        modifier = modifier
-    ) {
-        Column(
-            modifier = Modifier.padding(vertical = 12.dp, horizontal = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = accentColor,
-                modifier = Modifier.size(26.dp)
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = title,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary
-            )
-            Text(
-                text = subtitle,
-                fontSize = 10.sp,
-                color = TextSecondary
-            )
         }
     }
 }

@@ -107,6 +107,91 @@ fun YouTubeScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // 0. Быстрые кнопки разделов SmartTube
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "УПРАВЛЕНИЕ SMARTTUBE НА ТВ",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextSecondary,
+                            letterSpacing = 1.sp
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(
+                                Triple("home", "Главная", Icons.Default.Home),
+                                Triple("menu", "Меню", Icons.Default.Menu),
+                                Triple("search", "Поиск", Icons.Default.Search)
+                            ).forEach { (key, label, icon) ->
+                                Surface(
+                                    onClick = { viewModel.openSmartTubeSection(key) },
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = DarkSurfaceElevated,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Icon(
+                                            imageVector = icon,
+                                            contentDescription = label,
+                                            tint = AccentRed,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = label,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = TextPrimary,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
+                            Surface(
+                                onClick = { viewModel.bookmarkCurrentYouTubeVideo() },
+                                shape = RoundedCornerShape(12.dp),
+                                color = DarkSurfaceElevated,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.BookmarkAdd,
+                                        contentDescription = "Закладка",
+                                        tint = AccentYandex,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Закладка",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = AccentYandex,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // 1. Блок ввода и вставки ролика или поиска
             item {
                 Card(

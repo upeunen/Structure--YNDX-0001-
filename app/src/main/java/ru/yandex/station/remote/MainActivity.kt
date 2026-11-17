@@ -6,9 +6,12 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Movie
@@ -16,7 +19,12 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import ru.yandex.station.remote.ui.*
 
 class MainActivity : ComponentActivity() {
@@ -48,29 +56,10 @@ class MainActivity : ComponentActivity() {
                             containerColor = DarkSurface,
                             contentColor = AccentYandex
                         ) {
-                            // 1. Пульт (главный экран, всегда доступен)
+                            // 1. Кинозал (главный экран)
                             NavigationBarItem(
-                                selected = uiState.activeAppScreen == AppScreen.REMOTE,
-                                onClick = { viewModel.setAppScreen(AppScreen.REMOTE) },
-                                icon = {
-                                    Icon(
-                                        imageVector = Icons.Default.TouchApp,
-                                        contentDescription = "Пульт"
-                                    )
-                                },
-                                label = { Text("Пульт") },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = AccentYandex,
-                                    unselectedIconColor = TextSecondary,
-                                    selectedTextColor = AccentYandex,
-                                    unselectedTextColor = TextSecondary,
-                                    indicatorColor = DarkSurfaceElevated
-                                )
-                            )
-
-                            // 2. Кинозал
-                            NavigationBarItem(
-                                selected = uiState.activeAppScreen == AppScreen.CINEMA,
+                                selected = uiState.activeAppScreen == AppScreen.CINEMA ||
+                                    uiState.activeAppScreen == AppScreen.COLLECTIONS,
                                 onClick = { viewModel.setAppScreen(AppScreen.CINEMA) },
                                 icon = {
                                     Icon(
@@ -88,13 +77,10 @@ class MainActivity : ComponentActivity() {
                                 )
                             )
 
-                            // 3. Алиса (быстрый возврат к часам в 1 касание)
+                            // 2. Алиса (быстрый возврат к часам в 1 касание)
                             NavigationBarItem(
                                 selected = false,
-                                onClick = {
-                                    viewModel.launchAlice()
-                                    viewModel.setAppScreen(AppScreen.REMOTE)
-                                },
+                                onClick = { viewModel.launchAlice() },
                                 icon = {
                                     Icon(
                                         imageVector = Icons.Default.Home,
@@ -112,7 +98,7 @@ class MainActivity : ComponentActivity() {
                                 )
                             )
 
-                            // 4. YouTube
+                            // 3. YouTube
                             NavigationBarItem(
                                 selected = uiState.activeAppScreen == AppScreen.YOUTUBE,
                                 onClick = { viewModel.setAppScreen(AppScreen.YOUTUBE) },
@@ -140,25 +126,96 @@ class MainActivity : ComponentActivity() {
                             .padding(innerPadding)
                     ) {
                         when (uiState.activeAppScreen) {
-                            AppScreen.REMOTE -> {
-                                RemoteScreen(
-                                    viewModel = viewModel,
-                                    onOpenSettings = { showSettings = true }
-                                )
-                            }
                             AppScreen.CINEMA -> {
                                 CinemaScreen(
                                     viewModel = viewModel,
                                     onOpenSettings = { showSettings = true },
-                                    onBackToRemote = { viewModel.setAppScreen(AppScreen.REMOTE) }
+                                    onOpenCollections = { viewModel.setAppScreen(AppScreen.COLLECTIONS) }
+                                )
+                            }
+                            AppScreen.COLLECTIONS -> {
+                                CollectionsScreen(
+                                    viewModel = viewModel,
+                                    onBack = { viewModel.setAppScreen(AppScreen.CINEMA) }
                                 )
                             }
                             AppScreen.YOUTUBE -> {
                                 YouTubeScreen(
                                     viewModel = viewModel,
                                     onOpenSettings = { showSettings = true },
-                                    onBackToRemote = { viewModel.setAppScreen(AppScreen.REMOTE) }
+                                    onBackToRemote = { viewModel.openRemoteModal() }
                                 )
+                            }
+                        }
+
+                        // Кнопка «Пульт» по центру в верхней шапке на всех экранах
+                        Surface(
+                            onClick = { viewModel.openRemoteModal() },
+                            shape = RoundedCornerShape(20.dp),
+                            color = AccentYandex,
+                            shadowElevation = 6.dp,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.TouchApp,
+                                    contentDescription = "Пульт",
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Пульт",
+                                    color = Color.Black,
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
+                        }
+
+                        // Модальное окно Пульта поверх всех окон
+                        if (uiState.isRemoteModalOpen) {
+                            Dialog(
+                                onDismissRequest = { viewModel.closeRemoteModal() },
+                                properties = DialogProperties(usePlatformDefaultWidth = false)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.72f))
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null,
+                                            onClick = { viewModel.closeRemoteModal() }
+                                        )
+                                        .padding(horizontal = 12.dp, vertical = 24.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(24.dp),
+                                        color = OledBlack,
+                                        border = BorderStroke(1.dp, DarkSurfaceElevated),
+                                        tonalElevation = 16.dp,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 760.dp)
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                indication = null,
+                                                onClick = {}
+                                            )
+                                    ) {
+                                        RemoteScreen(
+                                            viewModel = viewModel,
+                                            onOpenSettings = { showSettings = true },
+                                            onDismiss = { viewModel.closeRemoteModal() }
+                                        )
+                                    }
+                                }
                             }
                         }
 

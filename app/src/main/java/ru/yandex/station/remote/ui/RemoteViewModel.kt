@@ -227,9 +227,9 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
     fun launchAlice() {
         vibrate(50)
-        _uiState.value = _uiState.value.copy(activeMoviePlaying = null, lastMessage = "Экран Алисы включен")
+        _uiState.value = _uiState.value.copy(activeMoviePlaying = null, lastMessage = "Остановлено: экран Алисы включен")
         viewModelScope.launch {
-            adbClient.execute("am force-stop com.softwinner.fireplayer; am force-stop org.smarttube.stable; input keyevent 3; am start -a android.intent.action.MAIN -c android.intent.category.HOME")
+            adbClient.execute("am force-stop com.softwinner.fireplayer; am force-stop org.smarttube.stable; am force-stop org.schabi.newpipe; am force-stop top.rootu.lampa; input keyevent 86; input keyevent 3; am start -n ru.yandex.quasar.app/.splash.SplashActivity -a android.intent.action.MAIN -c android.intent.category.HOME; am start -a android.intent.action.MAIN -c android.intent.category.HOME")
         }
     }
 
@@ -417,21 +417,28 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 return@launch
             }
 
-            // 2. Ожидаем кэширование метаданных и находим точный ID видеофайла
+            // 2. Пробуждаем торрент в движке и находим точный ID видеофайла
             _uiState.value = _uiState.value.copy(
-                lastMessage = "Кэширование и поиск видеопотока..."
+                lastMessage = "Поиск видеофайла в раздаче..."
             )
+            torrServerClient.wakeTorrent(torrentHash)
             val bestFileId = torrServerClient.resolveBestVideoFileId(torrentHash, maxWaitSec = 8)
 
-            // 3. Формируем локальный видеопоток для плеера Станции
+            // 3. Запускаем предзагрузку буфера и крутим прелоадер для стабильного старта
+            _uiState.value = _uiState.value.copy(
+                lastMessage = "Буферизация перед запуском..."
+            )
+            torrServerClient.preloadFile(torrentHash, bestFileId)
+            delay(3500) // Наполнение буфера перед воспроизведением
+
+            // 4. Формируем локальный видеопоток для плеера Станции
             val streamUrl = torrServerClient.getStreamUrl(torrentHash, bestFileId)
 
-            // 4. Сворачиваем YouTube и запускаем аппаратный плеер Allwinner
+            // 5. Сворачиваем YouTube и запускаем аппаратный плеер Allwinner
             val adbCmd = "am force-stop org.smarttube.stable; am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\""
             var adbResult = adbClient.execute(adbCmd)
 
             if (!adbResult.isSuccess) {
-                // Резервный запуск через системный интент
                 val fallbackCmd = "am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\""
                 adbResult = adbClient.execute(fallbackCmd)
             }
@@ -439,7 +446,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             if (adbResult.isSuccess) {
                 _uiState.value = _uiState.value.copy(
                     isCinemaLoading = false,
-                    activeMoviePlaying = movie,
+                    activeMoviePlaying = movie.copy(magnetUrl = streamUrl),
                     lastMessage = "«${movie.title}» запущено на телевизоре!"
                 )
             } else {
@@ -490,7 +497,11 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.value = _uiState.value.copy(
                 lastMessage = "Кэширование и поиск видеопотока..."
             )
+            torrServerClient.wakeTorrent(torrentHash)
             val bestFileId = torrServerClient.resolveBestVideoFileId(torrentHash, maxWaitSec = 8)
+            torrServerClient.preloadFile(torrentHash, bestFileId)
+            delay(3500) // Буферизация перед воспроизведением
+
             val streamUrl = torrServerClient.getStreamUrl(torrentHash, bestFileId)
 
             val movie = MovieItem(
@@ -524,6 +535,50 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                     lastMessage = "Ошибка запуска плеера: ${adbResult.exceptionOrNull()?.message}"
                 )
             }
+        }
+    }
+
+    // Пауза, буферизация кэша торрента и возобновление / нормализация
+    fun normalizeAndBuffering() {
+        vibrate(45)
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(
+                isCinemaLoading = true,
+                lastMessage = "Пауза: наполнение буфера торрента..."
+            )
+            // 1. Ставим плеер на паузу
+            executeCommand("input keyevent 85")
+
+            // 2. Будим торрент и запрашиваем наполнение кэша
+            val activeMovie = _uiState.value.activeMoviePlaying
+            if (activeMovie != null) {
+                val hash = torrServerClient.extractHashFromMagnet(activeMovie.magnetUrl)
+                    ?: if (activeMovie.magnetUrl.contains("/stream/")) {
+                        activeMovie.magnetUrl.substringAfter("/stream/").substringBefore("/")
+                    } else null
+
+                if (!hash.isNullOrBlank()) {
+                    torrServerClient.wakeTorrent(hash)
+                    torrServerClient.preloadFile(hash, 0)
+                }
+            }
+
+            // 3. Ждем 4 секунды с крутящимся прелоадером
+            delay(4000)
+
+            // 4. Проверяем / перезапускаем плеер, если он вылетел
+            if (activeMovie != null && activeMovie.magnetUrl.startsWith("http")) {
+                val streamUrl = activeMovie.magnetUrl
+                val adbCmd = "am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\""
+                adbClient.execute(adbCmd)
+            } else {
+                executeCommand("input keyevent 85")
+            }
+
+            _uiState.value = _uiState.value.copy(
+                isCinemaLoading = false,
+                lastMessage = "Буфер пополнен, воспроизведение продолжено"
+            )
         }
     }
 

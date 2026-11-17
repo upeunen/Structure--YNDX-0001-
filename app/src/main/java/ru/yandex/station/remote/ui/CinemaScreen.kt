@@ -385,6 +385,16 @@ fun CinemaScreen(
                                 Icon(Icons.Default.Forward30, contentDescription = "+30с", tint = TextPrimary)
                             }
 
+                            // Кнопка принудительной подкачки буфера / нормализации
+                            IconButton(
+                                onClick = { viewModel.normalizeAndBuffering() },
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(DarkSurfaceElevated)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = "Буферизация и нормализация", tint = AccentYandex)
+                            }
+
                             IconButton(onClick = { viewModel.sendKeyEvent(25) }) {
                                 Icon(Icons.AutoMirrored.Filled.VolumeDown, contentDescription = "Громкость -", tint = TextPrimary)
                             }
@@ -400,6 +410,31 @@ fun CinemaScreen(
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Text("Стоп", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        // Если идет буферизация — крутим индикатор прелоадера
+                        if (uiState.isCinemaLoading) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(DarkSurfaceElevated)
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = AccentYandex
+                                )
+                                Text(
+                                    text = uiState.lastMessage ?: "Буферизация и наполнение кэша...",
+                                    fontSize = 11.sp,
+                                    color = AccentYandex,
+                                    maxLines = 1
+                                )
                             }
                         }
                     }

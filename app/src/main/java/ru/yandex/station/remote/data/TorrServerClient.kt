@@ -28,6 +28,57 @@ class TorrServerClient(
         return "http://127.0.0.1:$serverPort/api/stream/$torrentHash/$fileIdx"
     }
 
+    // Пробуждение торрента в движке TorrServer
+    suspend fun wakeTorrent(torrentHash: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val url = URL("$baseUrl/api/torrents/$torrentHash/wake")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 3000
+                readTimeout = 3000
+            }
+            conn.responseCode in 200..299
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    // Запуск предварительной буферизации файла
+    suspend fun preloadFile(torrentHash: String, fileId: Int): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val url = URL("$baseUrl/api/torrents/$torrentHash/files/$fileId/preload")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 3000
+                readTimeout = 3000
+            }
+            conn.responseCode in 200..299
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    // Проверка заполненности кэша (в байтах)
+    suspend fun getCacheFilled(torrentHash: String): Long = withContext(Dispatchers.IO) {
+        try {
+            val url = URL("$baseUrl/api/torrents/$torrentHash/cache")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 2000
+                readTimeout = 2000
+            }
+            if (conn.responseCode in 200..299) {
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(body)
+                json.optLong("filled", 0L)
+            } else {
+                0L
+            }
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
     // Добавление magnet-ссылки в TorrServer Silo
     suspend fun addTorrent(magnetUrl: String, title: String = ""): Result<String> = withContext(Dispatchers.IO) {
         try {

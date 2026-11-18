@@ -97,6 +97,10 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     @Volatile
     private var isStartingTorrServer: Boolean = false
 
+    private val fastCommandChannel = kotlinx.coroutines.channels.Channel<String>(capacity = 64)
+    @Volatile
+    private var lastUserActionTime: Long = 0L
+
     private var activeSeriesHash: String? = null
     private var activeSeriesMovie: MovieItem? = null
     private var activeSeriesFiles: List<TorrentVideoFile> = emptyList()
@@ -112,10 +116,24 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     init {
         checkConnection()
         startConnectionHeartbeat()
+        startCommandQueueProcessor()
         viewModelScope.launch {
             ensureTorrServerRunning(notifyIfStarted = false)
         }
         resolveOldYouTubeHistoryTitles()
+    }
+
+    private fun startCommandQueueProcessor() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            for (cmd in fastCommandChannel) {
+                val res = adbClient.executeFast(cmd)
+                if (res.isSuccess) {
+                    if (_uiState.value.connectionStatus != StationConnectionStatus.CONNECTED) {
+                        _uiState.value = _uiState.value.copy(connectionStatus = StationConnectionStatus.CONNECTED)
+                    }
+                }
+            }
+        }
     }
 
     private fun startConnectionHeartbeat() {
@@ -129,6 +147,10 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun refreshStationState() {
+        // Если пользователь недавно нажимал кнопки (меньше 4 сек), не нагружаем Станцию опросом
+        if (System.currentTimeMillis() - lastUserActionTime < 4000L) {
+            return
+        }
         val isOk = adbClient.testConnection()
         if (!isOk) {
             stopPlaybackMonitor()
@@ -338,7 +360,8 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     fun sendKeyEvent(keyCode: Int) {
         vibrate(30)
         cancelYouTubeAutoHide()
-        executeCommand("input keyevent $keyCode")
+        lastUserActionTime = System.currentTimeMillis()
+        fastCommandChannel.trySend("input keyevent $keyCode")
     }
 
     // Ввод текста с клавиатуры телефона на ТВ
@@ -382,7 +405,8 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
     fun tapCenter() {
         vibrate(40)
-        executeCommand("input tap 960 540")
+        lastUserActionTime = System.currentTimeMillis()
+        fastCommandChannel.trySend("input tap 960 540")
         _uiState.value = _uiState.value.copy(lastMessage = "👆 Тап по центру экрана")
     }
 

@@ -90,6 +90,67 @@ class AdbClient(
         }
     }
 
+    suspend fun executeFast(command: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            Socket().use { socket ->
+                socket.soTimeout = 3000
+                socket.connect(InetSocketAddress(host, port), 3000)
+                val out = socket.getOutputStream()
+                val input = socket.getInputStream()
+
+                // 1. Рукопожатие CNXN
+                val cnxnData = "host::\u0000".toByteArray(StandardCharsets.UTF_8)
+                val cnxnMsg = AdbProtocol.Message(
+                    command = AdbProtocol.A_CNXN,
+                    arg0 = AdbProtocol.A_VERSION,
+                    arg1 = AdbProtocol.MAX_PAYLOAD,
+                    data = cnxnData
+                )
+                cnxnMsg.write(out)
+
+                val cnxnResponse = AdbProtocol.Message.read(input)
+                if (cnxnResponse.command != AdbProtocol.A_CNXN) {
+                    return@withContext Result.failure(
+                        Exception("Устройство отклонило подключение ADB")
+                    )
+                }
+
+                // 2. Открытие shell-сессии в фоне
+                val localId = 1
+                val cmdData = "shell:($command) &\u0000".toByteArray(StandardCharsets.UTF_8)
+                val openMsg = AdbProtocol.Message(
+                    command = AdbProtocol.A_OPEN,
+                    arg0 = localId,
+                    arg1 = 0,
+                    data = cmdData
+                )
+                openMsg.write(out)
+
+                // 3. Подтверждение OKAY
+                val openResponse = AdbProtocol.Message.read(input)
+                if (openResponse.command != AdbProtocol.A_OKAY) {
+                    return@withContext Result.failure(
+                        Exception("Команда не принята устройством")
+                    )
+                }
+
+                // 4. Быстрое закрытие канала
+                try {
+                    val closeMsg = AdbProtocol.Message(
+                        command = AdbProtocol.A_CLSE,
+                        arg0 = localId,
+                        arg1 = openResponse.arg0
+                    )
+                    closeMsg.write(out)
+                } catch (_: Exception) {}
+
+                Result.success(Unit)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun testConnection(): Boolean = withContext(Dispatchers.IO) {
         try {
             Socket().use { socket ->

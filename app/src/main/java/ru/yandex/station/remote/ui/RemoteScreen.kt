@@ -7,8 +7,11 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -454,6 +457,10 @@ fun MediaPlaybackCard(
     }
 }
 
+enum class DPadSector {
+    NONE, UP, DOWN, LEFT, RIGHT, OK
+}
+
 @Composable
 fun DPadController(
     onUp: () -> Unit,
@@ -462,103 +469,173 @@ fun DPadController(
     onRight: () -> Unit,
     onOk: () -> Unit
 ) {
+    var activeSector by remember { mutableStateOf(DPadSector.NONE) }
+
     Box(
         modifier = Modifier
             .size(240.dp)
             .clip(CircleShape)
-            .background(DarkSurface)
-            .border(2.dp, DarkSurfaceElevated, CircleShape),
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    val centerPx = Offset(size.width / 2f, size.height / 2f)
+                    val dx = down.position.x - centerPx.x
+                    val dy = down.position.y - centerPx.y
+                    val dist = kotlin.math.sqrt(dx * dx + dy * dy)
+                    val centerRadiusPx = 40.dp.toPx()
+                    val outerRadiusPx = size.width / 2f
+
+                    val sector = if (dist <= centerRadiusPx) {
+                        DPadSector.OK
+                    } else if (dist <= outerRadiusPx) {
+                        val angle = Math.toDegrees(kotlin.math.atan2(dy.toDouble(), dx.toDouble()))
+                        when {
+                            angle >= -135.0 && angle < -45.0 -> DPadSector.UP
+                            angle >= -45.0 && angle < 45.0 -> DPadSector.RIGHT
+                            angle >= 45.0 && angle < 135.0 -> DPadSector.DOWN
+                            else -> DPadSector.LEFT
+                        }
+                    } else {
+                        DPadSector.NONE
+                    }
+
+                    activeSector = sector
+                    when (sector) {
+                        DPadSector.UP -> onUp()
+                        DPadSector.DOWN -> onDown()
+                        DPadSector.LEFT -> onLeft()
+                        DPadSector.RIGHT -> onRight()
+                        DPadSector.OK -> onOk()
+                        DPadSector.NONE -> {}
+                    }
+
+                    waitForUpOrCancellation()
+                    activeSector = DPadSector.NONE
+                }
+            },
         contentAlignment = Alignment.Center
     ) {
-        // Вверх
-        Box(
+        // Фоновая отрисовка круга, секторов и подсветки активного сектора
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val radius = size.width / 2f
+
+            // Фон базы
+            drawCircle(color = DarkSurface, radius = radius, center = center)
+
+            // Подсветка нажатого сектора
+            val highlightColor = AccentYandex.copy(alpha = 0.35f)
+            when (activeSector) {
+                DPadSector.UP -> {
+                    drawArc(
+                        color = highlightColor,
+                        startAngle = -135f,
+                        sweepAngle = 90f,
+                        useCenter = true
+                    )
+                }
+                DPadSector.RIGHT -> {
+                    drawArc(
+                        color = highlightColor,
+                        startAngle = -45f,
+                        sweepAngle = 90f,
+                        useCenter = true
+                    )
+                }
+                DPadSector.DOWN -> {
+                    drawArc(
+                        color = highlightColor,
+                        startAngle = 45f,
+                        sweepAngle = 90f,
+                        useCenter = true
+                    )
+                }
+                DPadSector.LEFT -> {
+                    drawArc(
+                        color = highlightColor,
+                        startAngle = 135f,
+                        sweepAngle = 90f,
+                        useCenter = true
+                    )
+                }
+                else -> {}
+            }
+
+            // Тонкие разделительные засечки между секторами (45°, 135°, 225°, 315°)
+            val strokeColor = DarkSurfaceElevated.copy(alpha = 0.7f)
+            val strokeWidth = 1.5.dp.toPx()
+            val innerR = 40.dp.toPx()
+            for (angleDeg in listOf(-135.0, -45.0, 45.0, 135.0)) {
+                val rad = Math.toRadians(angleDeg)
+                val cosA = kotlin.math.cos(rad).toFloat()
+                val sinA = kotlin.math.sin(rad).toFloat()
+                drawLine(
+                    color = strokeColor,
+                    start = Offset(center.x + innerR * cosA, center.y + innerR * sinA),
+                    end = Offset(center.x + radius * cosA, center.y + radius * sinA),
+                    strokeWidth = strokeWidth
+                )
+            }
+
+            // Внешний контур круга
+            drawCircle(
+                color = DarkSurfaceElevated,
+                radius = radius - 1.dp.toPx(),
+                center = center,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
+            )
+        }
+
+        // Иконка: Вверх
+        Icon(
+            imageVector = Icons.Default.KeyboardArrowUp,
+            contentDescription = "Вверх",
+            tint = if (activeSector == DPadSector.UP) AccentYandex else TextPrimary,
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .height(80.dp)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onUp
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.KeyboardArrowUp,
-                contentDescription = "Вверх",
-                tint = TextPrimary,
-                modifier = Modifier.size(40.dp)
-            )
-        }
+                .padding(top = 18.dp)
+                .size(38.dp)
+        )
 
-        // Вниз
-        Box(
+        // Иконка: Вниз
+        Icon(
+            imageVector = Icons.Default.KeyboardArrowDown,
+            contentDescription = "Вниз",
+            tint = if (activeSector == DPadSector.DOWN) AccentYandex else TextPrimary,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(80.dp)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onDown
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.KeyboardArrowDown,
-                contentDescription = "Вниз",
-                tint = TextPrimary,
-                modifier = Modifier.size(40.dp)
-            )
-        }
+                .padding(bottom = 18.dp)
+                .size(38.dp)
+        )
 
-        // Влево
-        Box(
+        // Иконка: Влево
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+            contentDescription = "Влево",
+            tint = if (activeSector == DPadSector.LEFT) AccentYandex else TextPrimary,
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .fillMaxHeight()
-                .width(80.dp)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onLeft
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                contentDescription = "Влево",
-                tint = TextPrimary,
-                modifier = Modifier.size(40.dp)
-            )
-        }
+                .padding(start = 18.dp)
+                .size(38.dp)
+        )
 
-        // Вправо
-        Box(
+        // Иконка: Вправо
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = "Вправо",
+            tint = if (activeSector == DPadSector.RIGHT) AccentYandex else TextPrimary,
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .fillMaxHeight()
-                .width(80.dp)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onRight
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = "Вправо",
-                tint = TextPrimary,
-                modifier = Modifier.size(40.dp)
-            )
-        }
+                .padding(end = 18.dp)
+                .size(38.dp)
+        )
 
         // Центральная кнопка ОК
         Surface(
-            onClick = onOk,
             shape = CircleShape,
-            color = AccentYandex,
+            color = if (activeSector == DPadSector.OK) AccentYandex.copy(alpha = 0.8f) else AccentYandex,
+            border = BorderStroke(2.dp, if (activeSector == DPadSector.OK) Color.White else DarkSurfaceElevated),
             modifier = Modifier.size(76.dp)
         ) {
             Box(

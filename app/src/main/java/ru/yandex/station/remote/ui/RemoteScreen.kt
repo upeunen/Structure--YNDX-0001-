@@ -104,6 +104,24 @@ fun RemoteScreen(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = { viewModel.cleanStationMemory() },
+                    enabled = !uiState.isCleaningMemory
+                ) {
+                    if (uiState.isCleaningMemory) {
+                        CircularProgressIndicator(
+                            color = AccentYandex,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.CleaningServices,
+                            contentDescription = "Очистить память Станции",
+                            tint = AccentYandex
+                        )
+                    }
+                }
                 IconButton(onClick = onOpenSettings) {
                     Icon(
                         imageVector = Icons.Default.Settings,
@@ -178,6 +196,13 @@ fun RemoteScreen(
 
             // Плеер воспроизведения ТВ (Play, Pause, Плавная перемотка, Громкость, Меню, Дорожка, Субтитры)
             MediaPlaybackCard(
+                mediaTitle = uiState.activeMoviePlaying?.title,
+                hasSeries = uiState.hasSeries,
+                currentEpisodeTitle = uiState.currentEpisodeTitle,
+                hasNextEpisode = uiState.hasNextEpisode,
+                hasPrevEpisode = uiState.hasPrevEpisode,
+                onPreviousEpisode = { viewModel.playPreviousEpisode() },
+                onNextEpisode = { viewModel.playNextEpisode() },
                 playbackSec = uiState.activePlaybackSec,
                 isPlaying = uiState.isPlaying,
                 onSeekRelative = { viewModel.seekRelativeSeconds(it) },
@@ -193,6 +218,8 @@ fun RemoteScreen(
                 onBack = { viewModel.sendKeyEvent(4) },
                 onMenu = { viewModel.sendKeyEvent(82) },
                 onAudioTrack = { viewModel.switchAudioTrack() },
+                onNextAudioTrack = { viewModel.nextAudioTrack() },
+                onPrevAudioTrack = { viewModel.previousAudioTrack() },
                 onSubtitles = { viewModel.toggleSubtitles() },
                 onBookmark = { viewModel.bookmarkCurrentMedia() }
             )
@@ -204,6 +231,13 @@ fun RemoteScreen(
 
 @Composable
 fun MediaPlaybackCard(
+    mediaTitle: String? = null,
+    hasSeries: Boolean = false,
+    currentEpisodeTitle: String? = null,
+    hasNextEpisode: Boolean = false,
+    hasPrevEpisode: Boolean = false,
+    onPreviousEpisode: (() -> Unit)? = null,
+    onNextEpisode: (() -> Unit)? = null,
     playbackSec: Long,
     isPlaying: Boolean,
     onSeekRelative: (Long) -> Unit,
@@ -219,6 +253,8 @@ fun MediaPlaybackCard(
     onBack: () -> Unit,
     onMenu: () -> Unit,
     onAudioTrack: () -> Unit,
+    onNextAudioTrack: () -> Unit,
+    onPrevAudioTrack: () -> Unit,
     onSubtitles: () -> Unit,
     onBookmark: () -> Unit
 ) {
@@ -237,6 +273,90 @@ fun MediaPlaybackCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // Информационная плашка проигрываемого медиа
+            if (mediaTitle != null) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = DarkSurfaceElevated,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Movie,
+                                contentDescription = null,
+                                tint = AccentYandex,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = mediaTitle,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary,
+                                maxLines = 1,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        if (hasSeries && onPreviousEpisode != null && onNextEpisode != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                FilledTonalButton(
+                                    onClick = onPreviousEpisode,
+                                    enabled = hasPrevEpisode,
+                                    colors = ButtonDefaults.filledTonalButtonColors(
+                                        containerColor = Color.White.copy(alpha = 0.1f),
+                                        disabledContainerColor = Color.Transparent,
+                                        contentColor = TextPrimary,
+                                        disabledContentColor = TextSecondary.copy(alpha = 0.3f)
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(28.dp)
+                                ) {
+                                    Icon(Icons.Default.SkipPrevious, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Пред. серия", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                Text(
+                                    text = currentEpisodeTitle ?: "Сериал",
+                                    fontSize = 11.sp,
+                                    color = TextSecondary,
+                                    maxLines = 1,
+                                    modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+
+                                FilledTonalButton(
+                                    onClick = onNextEpisode,
+                                    enabled = hasNextEpisode,
+                                    colors = ButtonDefaults.filledTonalButtonColors(
+                                        containerColor = AccentYandex,
+                                        disabledContainerColor = Color.Transparent,
+                                        contentColor = Color.Black,
+                                        disabledContentColor = TextSecondary.copy(alpha = 0.3f)
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(28.dp)
+                                ) {
+                                    Text("След. серия", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Icon(Icons.Default.SkipNext, contentDescription = null, modifier = Modifier.size(14.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -423,19 +543,43 @@ fun MediaPlaybackCard(
                 )
             }
 
-            // Быстрые кнопки: Звуковая дорожка, Субтитры и Закладка
+            // Управление звуковыми дорожками: Пред. дорожка, Меню дорожек, След. дорожка
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 OutlinedButton(
-                    onClick = onAudioTrack,
+                    onClick = onPrevAudioTrack,
                     shape = RoundedCornerShape(10.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("🔊 Дорожка", fontSize = 11.sp, color = TextPrimary, maxLines = 1)
+                    Text("◄ Пред.", fontSize = 11.sp, color = TextPrimary, maxLines = 1)
                 }
+                Button(
+                    onClick = onAudioTrack,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+                    modifier = Modifier.weight(1.3f)
+                ) {
+                    Text("🔊 Дорожка", fontSize = 11.sp, color = AccentYandex, fontWeight = FontWeight.Bold, maxLines = 1)
+                }
+                OutlinedButton(
+                    onClick = onNextAudioTrack,
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("След. ►", fontSize = 11.sp, color = TextPrimary, maxLines = 1)
+                }
+            }
+
+            // Быстрые кнопки: Субтитры и Закладка
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
                 OutlinedButton(
                     onClick = onSubtitles,
                     shape = RoundedCornerShape(10.dp),
@@ -457,10 +601,6 @@ fun MediaPlaybackCard(
     }
 }
 
-enum class DPadSector {
-    NONE, UP, DOWN, LEFT, RIGHT, OK
-}
-
 @Composable
 fun DPadController(
     onUp: () -> Unit,
@@ -469,174 +609,97 @@ fun DPadController(
     onRight: () -> Unit,
     onOk: () -> Unit
 ) {
-    var activeSector by remember { mutableStateOf(DPadSector.NONE) }
-
     Box(
-        modifier = Modifier
-            .size(240.dp)
-            .clip(CircleShape)
-            .pointerInput(Unit) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    down.consume()
-                    val centerPx = Offset(size.width / 2f, size.height / 2f)
-                    val dx = down.position.x - centerPx.x
-                    val dy = down.position.y - centerPx.y
-                    val dist = kotlin.math.sqrt(dx * dx + dy * dy)
-                    val centerRadiusPx = 40.dp.toPx()
-                    val outerRadiusPx = size.width / 2f
-
-                    val sector = if (dist <= centerRadiusPx) {
-                        DPadSector.OK
-                    } else if (dist <= outerRadiusPx) {
-                        val angle = Math.toDegrees(kotlin.math.atan2(dy.toDouble(), dx.toDouble()))
-                        when {
-                            angle >= -135.0 && angle < -45.0 -> DPadSector.UP
-                            angle >= -45.0 && angle < 45.0 -> DPadSector.RIGHT
-                            angle >= 45.0 && angle < 135.0 -> DPadSector.DOWN
-                            else -> DPadSector.LEFT
-                        }
-                    } else {
-                        DPadSector.NONE
-                    }
-
-                    activeSector = sector
-                    when (sector) {
-                        DPadSector.UP -> onUp()
-                        DPadSector.DOWN -> onDown()
-                        DPadSector.LEFT -> onLeft()
-                        DPadSector.RIGHT -> onRight()
-                        DPadSector.OK -> onOk()
-                        DPadSector.NONE -> {}
-                    }
-
-                    waitForUpOrCancellation()
-                    activeSector = DPadSector.NONE
-                }
-            },
+        modifier = Modifier.size(240.dp),
         contentAlignment = Alignment.Center
     ) {
-        // Фоновая отрисовка круга, секторов и подсветки активного сектора
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val center = Offset(size.width / 2f, size.height / 2f)
-            val radius = size.width / 2f
-
-            // Фон базы
-            drawCircle(color = DarkSurface, radius = radius, center = center)
-
-            // Подсветка нажатого сектора
-            val highlightColor = AccentYandex.copy(alpha = 0.35f)
-            when (activeSector) {
-                DPadSector.UP -> {
-                    drawArc(
-                        color = highlightColor,
-                        startAngle = -135f,
-                        sweepAngle = 90f,
-                        useCenter = true
-                    )
-                }
-                DPadSector.RIGHT -> {
-                    drawArc(
-                        color = highlightColor,
-                        startAngle = -45f,
-                        sweepAngle = 90f,
-                        useCenter = true
-                    )
-                }
-                DPadSector.DOWN -> {
-                    drawArc(
-                        color = highlightColor,
-                        startAngle = 45f,
-                        sweepAngle = 90f,
-                        useCenter = true
-                    )
-                }
-                DPadSector.LEFT -> {
-                    drawArc(
-                        color = highlightColor,
-                        startAngle = 135f,
-                        sweepAngle = 90f,
-                        useCenter = true
-                    )
-                }
-                else -> {}
-            }
-
-            // Тонкие разделительные засечки между секторами (45°, 135°, 225°, 315°)
-            val strokeColor = DarkSurfaceElevated.copy(alpha = 0.7f)
-            val strokeWidth = 1.5.dp.toPx()
-            val innerR = 40.dp.toPx()
-            for (angleDeg in listOf(-135.0, -45.0, 45.0, 135.0)) {
-                val rad = Math.toRadians(angleDeg)
-                val cosA = kotlin.math.cos(rad).toFloat()
-                val sinA = kotlin.math.sin(rad).toFloat()
-                drawLine(
-                    color = strokeColor,
-                    start = Offset(center.x + innerR * cosA, center.y + innerR * sinA),
-                    end = Offset(center.x + radius * cosA, center.y + radius * sinA),
-                    strokeWidth = strokeWidth
-                )
-            }
-
-            // Внешний контур круга
-            drawCircle(
-                color = DarkSurfaceElevated,
-                radius = radius - 1.dp.toPx(),
-                center = center,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
-            )
-        }
-
-        // Иконка: Вверх
-        Icon(
-            imageVector = Icons.Default.KeyboardArrowUp,
-            contentDescription = "Вверх",
-            tint = if (activeSector == DPadSector.UP) AccentYandex else TextPrimary,
+        // Кнопка ВВЕРХ
+        Surface(
+            onClick = onUp,
+            shape = RoundedCornerShape(16.dp),
+            color = DarkSurface,
+            border = BorderStroke(1.5.dp, DarkSurfaceElevated),
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 18.dp)
-                .size(38.dp)
-        )
+                .size(width = 84.dp, height = 64.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowUp,
+                    contentDescription = "Вверх",
+                    tint = TextPrimary,
+                    modifier = Modifier.size(36.dp)
+                )
+            }
+        }
 
-        // Иконка: Вниз
-        Icon(
-            imageVector = Icons.Default.KeyboardArrowDown,
-            contentDescription = "Вниз",
-            tint = if (activeSector == DPadSector.DOWN) AccentYandex else TextPrimary,
+        // Кнопка ВНИЗ
+        Surface(
+            onClick = onDown,
+            shape = RoundedCornerShape(16.dp),
+            color = DarkSurface,
+            border = BorderStroke(1.5.dp, DarkSurfaceElevated),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 18.dp)
-                .size(38.dp)
-        )
+                .size(width = 84.dp, height = 64.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Вниз",
+                    tint = TextPrimary,
+                    modifier = Modifier.size(36.dp)
+                )
+            }
+        }
 
-        // Иконка: Влево
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-            contentDescription = "Влево",
-            tint = if (activeSector == DPadSector.LEFT) AccentYandex else TextPrimary,
+        // Кнопка ВЛЕВО
+        Surface(
+            onClick = onLeft,
+            shape = RoundedCornerShape(16.dp),
+            color = DarkSurface,
+            border = BorderStroke(1.5.dp, DarkSurfaceElevated),
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .padding(start = 18.dp)
-                .size(38.dp)
-        )
+                .size(width = 64.dp, height = 84.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                    contentDescription = "Влево",
+                    tint = TextPrimary,
+                    modifier = Modifier.size(36.dp)
+                )
+            }
+        }
 
-        // Иконка: Вправо
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = "Вправо",
-            tint = if (activeSector == DPadSector.RIGHT) AccentYandex else TextPrimary,
+        // Кнопка ВПРАВО
+        Surface(
+            onClick = onRight,
+            shape = RoundedCornerShape(16.dp),
+            color = DarkSurface,
+            border = BorderStroke(1.5.dp, DarkSurfaceElevated),
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .padding(end = 18.dp)
-                .size(38.dp)
-        )
+                .size(width = 64.dp, height = 84.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = "Вправо",
+                    tint = TextPrimary,
+                    modifier = Modifier.size(36.dp)
+                )
+            }
+        }
 
         // Центральная кнопка ОК
         Surface(
+            onClick = onOk,
             shape = CircleShape,
-            color = if (activeSector == DPadSector.OK) AccentYandex.copy(alpha = 0.8f) else AccentYandex,
-            border = BorderStroke(2.dp, if (activeSector == DPadSector.OK) Color.White else DarkSurfaceElevated),
-            modifier = Modifier.size(76.dp)
+            color = AccentYandex,
+            border = BorderStroke(2.dp, DarkSurfaceElevated),
+            modifier = Modifier.size(72.dp)
         ) {
             Box(
                 contentAlignment = Alignment.Center,

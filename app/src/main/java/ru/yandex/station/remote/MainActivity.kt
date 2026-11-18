@@ -2,6 +2,7 @@ package ru.yandex.station.remote
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.KeyEvent
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -225,6 +226,7 @@ class MainActivity : ComponentActivity() {
                                 currentPort = uiState.port,
                                 connectionStatus = uiState.connectionStatus,
                                 onTestConnection = { viewModel.checkConnection() },
+                                onCleanMemory = { viewModel.cleanStationMemory() },
                                 onSave = { newIp, newPort ->
                                     viewModel.saveSettings(newIp, newPort)
                                 },
@@ -234,6 +236,30 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.resumeSession()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        viewModel.pauseSession()
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        return when (keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP -> {
+                viewModel.sendKeyEvent(24) // KEYCODE_VOLUME_UP на Станции
+                true
+            }
+            KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                viewModel.sendKeyEvent(25) // KEYCODE_VOLUME_DOWN на Станции
+                true
+            }
+            else -> super.onKeyDown(keyCode, event)
         }
     }
 

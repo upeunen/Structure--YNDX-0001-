@@ -60,6 +60,11 @@ data class RemoteUiState(
     val activeMoviePlaying: MovieItem? = null,
     val activePlaybackSec: Long = 0L,
     val isPlaying: Boolean = false,
+    val hasSeries: Boolean = false,
+    val currentEpisodeTitle: String? = null,
+    val hasNextEpisode: Boolean = false,
+    val hasPrevEpisode: Boolean = false,
+    val isCleaningMemory: Boolean = false,
     val pendingEpisodeSelection: PendingEpisodeSelection? = null,
     val pendingPeerRetry: PendingPeerRetry? = null,
     val torrServerLiveStats: TorrServerClient.ActiveTorrentStats? = null,
@@ -134,6 +139,16 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         }
+    }
+
+    fun resumeSession() {
+        viewModelScope.launch {
+            adbClient.openSession()
+        }
+    }
+
+    fun pauseSession() {
+        adbClient.closeSession()
     }
 
     private fun startConnectionHeartbeat() {
@@ -361,7 +376,14 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         vibrate(30)
         cancelYouTubeAutoHide()
         lastUserActionTime = System.currentTimeMillis()
-        fastCommandChannel.trySend("input keyevent $keyCode")
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val result = adbClient.execute("input keyevent $keyCode")
+            if (result.isSuccess) {
+                if (_uiState.value.connectionStatus != StationConnectionStatus.CONNECTED) {
+                    _uiState.value = _uiState.value.copy(connectionStatus = StationConnectionStatus.CONNECTED)
+                }
+            }
+        }
     }
 
     // Ввод текста с клавиатуры телефона на ТВ
@@ -406,7 +428,9 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     fun tapCenter() {
         vibrate(40)
         lastUserActionTime = System.currentTimeMillis()
-        fastCommandChannel.trySend("input tap 960 540")
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            adbClient.execute("input tap 960 540")
+        }
         _uiState.value = _uiState.value.copy(lastMessage = "👆 Тап по центру экрана")
     }
 
@@ -1076,7 +1100,8 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
-    private fun playNextEpisode() {
+    fun playNextEpisode() {
+        vibrate(35)
         val hash = activeSeriesHash ?: return
         val movie = activeSeriesMovie ?: return
         if (activeSeriesIndex + 1 >= activeSeriesFiles.size) {
@@ -1085,13 +1110,14 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         }
         activeSeriesIndex++
         val nextFile = activeSeriesFiles[activeSeriesIndex]
-        addLog("Автопереключение на следующую серию: ${nextFile.name}")
+        addLog("Переключение на следующую серию: ${nextFile.name}")
         viewModelScope.launch {
             bufferAndLaunchFile(hash, nextFile, movie)
         }
     }
 
-    private fun playPreviousEpisode() {
+    fun playPreviousEpisode() {
+        vibrate(35)
         val hash = activeSeriesHash ?: return
         val movie = activeSeriesMovie ?: return
         if (activeSeriesIndex - 1 < 0) {
@@ -1247,11 +1273,20 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             } else {
                 "«${file.name}» запущено на телевизоре!"
             }
+            val hasMultipleEpisodes = activeSeriesFiles.size > 1
+            val epName = if (hasMultipleEpisodes) file.name else null
+            val canNext = hasMultipleEpisodes && (activeSeriesIndex + 1 < activeSeriesFiles.size)
+            val canPrev = hasMultipleEpisodes && (activeSeriesIndex - 1 >= 0)
+
             _uiState.value = _uiState.value.copy(
                 isCinemaLoading = false,
                 activeMoviePlaying = updatedMovie.copy(title = file.name, magnetUrl = streamUrl),
                 activePlaybackSec = savedPosSec,
                 isPlaying = true,
+                hasSeries = hasMultipleEpisodes,
+                currentEpisodeTitle = epName,
+                hasNextEpisode = canNext,
+                hasPrevEpisode = canPrev,
                 cinemaMovies = if (_uiState.value.selectedCinemaCategory == "🕒 История") historyRepo.getHistory() else _uiState.value.cinemaMovies,
                 cinemaStatusMessage = okMsg,
                 lastMessage = okMsg
@@ -1334,10 +1369,59 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         return historyRepo.isFavorite(movieId)
     }
 
-    fun stopCinemaAndReturnAlice() {
+    fun stopCinemaAndReturnAlice(cleanMemory: Boolean = true) {
         vibrate(50)
-        _uiState.value = _uiState.value.copy(activeMoviePlaying = null)
+        _uiState.value = _uiState.value.copy(
+            activeMoviePlaying = null,
+            hasSeries = false,
+            currentEpisodeTitle = null,
+            hasNextEpisode = false,
+            hasPrevEpisode = false,
+            isPlaying = false
+        )
         launchAlice()
+        if (cleanMemory) {
+            cleanStationMemory()
+        }
+    }
+
+    // Быстрая очистка кэша и оперативной памяти Станции (1 клик)
+    fun cleanStationMemory() {
+        vibrate(40)
+        _uiState.value = _uiState.value.copy(
+            isCleaningMemory = true,
+            lastMessage = "🧹 Очистка памяти Станции..."
+        )
+        viewModelScope.launch {
+            try {
+                // Сброс дискового кэша ядра Linux и освобождение неиспользуемых фоновых процессов
+                val cleanCmd = "su 0 sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches; am kill-all'; cat /proc/meminfo"
+                val res = adbClient.execute(cleanCmd)
+                var freeMb = 0
+                if (res.isSuccess) {
+                    val output = res.getOrNull().orEmpty()
+                    val memFreeLine = output.lines().firstOrNull { it.startsWith("MemFree:") }
+                    if (memFreeLine != null) {
+                        val kb = memFreeLine.replace("MemFree:", "").replace("kB", "").trim().toIntOrNull() ?: 0
+                        freeMb = kb / 1024
+                    }
+                }
+                val msg = if (freeMb > 0) {
+                    "🧹 Память Станции очищена: свободно $freeMb МБ"
+                } else {
+                    "🧹 Память Станции успешно очищена!"
+                }
+                _uiState.value = _uiState.value.copy(
+                    isCleaningMemory = false,
+                    lastMessage = msg
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isCleaningMemory = false,
+                    lastMessage = "Ошибка очистки памяти: ${e.message}"
+                )
+            }
+        }
     }
 
     fun clearLastMessage() {
@@ -1451,10 +1535,25 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
     fun switchAudioTrack() {
         vibrate(30)
-        viewModelScope.launch {
-            // В Allwinner fireplayer / Android TV медиа-дорожка переключается KEYCODE_MEDIA_AUDIO_TRACK (222)
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             adbClient.execute("input keyevent 222")
-            _uiState.value = _uiState.value.copy(lastMessage = "Переключение аудиодорожки")
+            _uiState.value = _uiState.value.copy(lastMessage = "Меню дорожек на ТВ")
+        }
+    }
+
+    fun nextAudioTrack() {
+        vibrate(35)
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            adbClient.execute("input keyevent 222; sleep 0.25; input keyevent 20; sleep 0.15; input keyevent 66")
+            _uiState.value = _uiState.value.copy(lastMessage = "Включена следующая дорожка")
+        }
+    }
+
+    fun previousAudioTrack() {
+        vibrate(35)
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            adbClient.execute("input keyevent 222; sleep 0.25; input keyevent 19; sleep 0.15; input keyevent 66")
+            _uiState.value = _uiState.value.copy(lastMessage = "Включена предыдущая дорожка")
         }
     }
 

@@ -5,6 +5,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,6 +24,7 @@ fun SettingsDialog(
     currentPort: Int,
     connectionStatus: StationConnectionStatus,
     onTestConnection: () -> Unit,
+    onCleanMemory: (() -> Unit)? = null,
     onSave: (ip: String, port: Int) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -120,6 +122,24 @@ fun SettingsDialog(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Проверить")
+                    }
+                }
+
+                if (onCleanMemory != null) {
+                    OutlinedButton(
+                        onClick = onCleanMemory,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentYandex),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, AccentYandex.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CleaningServices,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Очистить память Станции (кэш)", fontWeight = FontWeight.Bold)
                     }
                 }
 

@@ -176,6 +176,24 @@ fun CinemaScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { viewModel.cleanStationMemory() },
+                        enabled = !uiState.isCleaningMemory
+                    ) {
+                        if (uiState.isCleaningMemory) {
+                            CircularProgressIndicator(
+                                color = AccentYandex,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.CleaningServices,
+                                contentDescription = "Очистить память Станции",
+                                tint = AccentYandex
+                            )
+                        }
+                    }
                     FilledTonalButton(
                         onClick = onOpenCollections,
                         colors = ButtonDefaults.filledTonalButtonColors(
@@ -320,9 +338,9 @@ fun CinemaScreen(
                 }
             }
 
-            // Горизонтальные категории: История, Закладки, Сборки, Смотреть позже
+            // Горизонтальные категории: История, Закладки, Смотреть позже
             item {
-                val categories = listOf("🕒 История", "⭐ Закладки", "🎬 Сборки", "📌 Смотреть позже")
+                val categories = listOf("🕒 История", "⭐ Закладки", "📌 Смотреть позже")
                 val scrollState = rememberScrollState()
 
                 Row(
@@ -335,11 +353,7 @@ fun CinemaScreen(
                         val isSelected = uiState.selectedCinemaCategory == cat
                         Surface(
                             onClick = {
-                                if (cat == "🎬 Сборки") {
-                                    onOpenCollections()
-                                } else {
-                                    viewModel.selectCinemaCategory(cat)
-                                }
+                                viewModel.selectCinemaCategory(cat)
                             },
                             shape = RoundedCornerShape(20.dp),
                             color = if (isSelected) AccentYandex else DarkSurface,
@@ -539,139 +553,79 @@ fun CinemaScreen(
             }
         }
 
-        // Всплывающий мини-пульт воспроизведения фильма
+        // Тонкая информационная полоска активного воспроизведения: по клику открывает «Пульт», крестик останавливает и очищает память
         uiState.activeMoviePlaying?.let { playingMovie ->
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .padding(12.dp)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 Surface(
-                    shape = RoundedCornerShape(20.dp),
+                    onClick = { viewModel.openRemoteModal() },
+                    shape = RoundedCornerShape(14.dp),
                     color = Color(0xFF18181C),
-                    border = androidx.compose.foundation.BorderStroke(1.5.dp, AccentYandex),
-                    tonalElevation = 10.dp,
+                    border = androidx.compose.foundation.BorderStroke(1.2.dp, AccentYandex),
+                    tonalElevation = 8.dp,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    Column {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "СЕЙЧАС ИГРАЕТ НА ТВ",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = StatusGreen,
-                                    letterSpacing = 1.sp
-                                )
-                                Text(
-                                    text = playingMovie.title,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextPrimary,
-                                    maxLines = 1
-                                )
-                            }
-
-                            IconButton(
-                                onClick = { viewModel.stopCinemaAndReturnAlice() }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
                             ) {
                                 Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = "Остановить и закрыть",
-                                    tint = TextSecondary
+                                    imageVector = Icons.Default.Movie,
+                                    contentDescription = null,
+                                    tint = AccentYandex,
+                                    modifier = Modifier.size(20.dp)
                                 )
-                            }
-                        }
-
-                        // Кнопки управления плеером фильма
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(onClick = { viewModel.mediaRewind() }) {
-                                Icon(Icons.Default.Replay10, contentDescription = "-10с", tint = TextPrimary)
-                            }
-
-                            // Пауза / Плей
-                            Surface(
-                                onClick = { viewModel.mediaPlayPause() },
-                                shape = CircleShape,
-                                color = AccentYandex,
-                                modifier = Modifier.size(50.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                    Icon(
-                                        imageVector = if (uiState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                        contentDescription = if (uiState.isPlaying) "Пауза" else "Воспроизведение",
-                                        tint = Color.Black
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = playingMovie.title,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = if (uiState.isPlaying) "▶ Воспроизводится • Нажмите для открытия пульта" else "⏸ На паузе • Нажмите для открытия пульта",
+                                        fontSize = 10.sp,
+                                        color = TextSecondary,
+                                        maxLines = 1
                                     )
                                 }
                             }
 
-                            IconButton(onClick = { viewModel.mediaFastForward() }) {
-                                Icon(Icons.Default.Forward30, contentDescription = "+30с", tint = TextPrimary)
-                            }
-
-                            // Кнопка принудительной подкачки буфера / нормализации
+                            // Крестик: закрывает плеер на Станции и автоматически очищает память
                             IconButton(
-                                onClick = { viewModel.normalizeAndBuffering() },
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(DarkSurfaceElevated)
+                                onClick = { viewModel.stopCinemaAndReturnAlice(cleanMemory = true) },
+                                modifier = Modifier.size(36.dp)
                             ) {
-                                Icon(Icons.Default.Refresh, contentDescription = "Буферизация и нормализация", tint = AccentYandex)
-                            }
-
-                            IconButton(onClick = { viewModel.sendKeyEvent(25) }) {
-                                Icon(Icons.AutoMirrored.Filled.VolumeDown, contentDescription = "Громкость -", tint = TextPrimary)
-                            }
-
-                            IconButton(onClick = { viewModel.sendKeyEvent(24) }) {
-                                Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Громкость +", tint = TextPrimary)
-                            }
-
-                            Button(
-                                onClick = { viewModel.stopCinemaAndReturnAlice() },
-                                colors = ButtonDefaults.buttonColors(containerColor = AccentRed),
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Text("Стоп", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Остановить и очистить память",
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
                         }
 
-                        // Если идет буферизация — крутим индикатор прелоадера
+                        // Если идет буферизация — аккуратный тонкий индикатор внизу полоски
                         if (uiState.isCinemaLoading) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(DarkSurfaceElevated)
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp,
-                                    color = AccentYandex
-                                )
-                                Text(
-                                    text = uiState.lastMessage ?: "Буферизация и наполнение кэша...",
-                                    fontSize = 11.sp,
-                                    color = AccentYandex,
-                                    maxLines = 1
-                                )
-                            }
+                            LinearProgressIndicator(
+                                color = AccentYandex,
+                                trackColor = DarkSurfaceElevated,
+                                modifier = Modifier.fillMaxWidth().height(2.dp)
+                            )
                         }
                     }
                 }

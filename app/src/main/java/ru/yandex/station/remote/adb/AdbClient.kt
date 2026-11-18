@@ -1,8 +1,6 @@
 package ru.yandex.station.remote.adb
 
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -21,61 +19,20 @@ class AdbClient(
     val port: Int = 5555,
     private val timeoutMs: Int = 12000
 ) {
-    private val sessionMutex = Mutex()
-    private var sessionSocket: Socket? = null
-    private var sessionLocalId = 100
-
     suspend fun openSession() = withContext(Dispatchers.IO) {
-        sessionMutex.withLock {
-            ensureSessionLocked()
-        }
+        // Заглушка: команды открывают собственные чистые сессии с быстрым сбросом TIME_WAIT
     }
 
     fun closeSession() {
-        try {
-            sessionSocket?.close()
-        } catch (_: Exception) {}
-        sessionSocket = null
-    }
-
-    private fun ensureSessionLocked(): Boolean {
-        val s = sessionSocket
-        if (s != null && s.isConnected && !s.isClosed) {
-            return true
-        }
-        closeSession()
-        return try {
-            val socket = Socket()
-            socket.soTimeout = 4000
-            socket.connect(InetSocketAddress(host, port), 2500)
-            val out = socket.getOutputStream()
-            val input = socket.getInputStream()
-
-            val cnxnData = "host::\u0000".toByteArray(StandardCharsets.UTF_8)
-            val cnxnMsg = AdbProtocol.Message(
-                command = AdbProtocol.A_CNXN,
-                arg0 = AdbProtocol.A_VERSION,
-                arg1 = AdbProtocol.MAX_PAYLOAD,
-                data = cnxnData
-            )
-            cnxnMsg.write(out)
-
-            val cnxnResponse = AdbProtocol.Message.read(input)
-            if (cnxnResponse.command == AdbProtocol.A_CNXN) {
-                sessionSocket = socket
-                true
-            } else {
-                socket.close()
-                false
-            }
-        } catch (_: Exception) {
-            false
-        }
+        // Заглушка
     }
 
     suspend fun execute(command: String): Result<String> = withContext(Dispatchers.IO) {
         try {
             Socket().use { socket ->
+                socket.reuseAddress = true
+                socket.tcpNoDelay = true
+                socket.setSoLinger(true, 0)
                 socket.soTimeout = timeoutMs
                 socket.connect(InetSocketAddress(host, port), timeoutMs)
                 val out = socket.getOutputStream()
@@ -142,7 +99,7 @@ class AdbClient(
                         }
                     }
                 } catch (_: Exception) {
-                    // Команды типа 'am start' и 'input keyevent' выполняются мгновенно, таймаут чтения вывода ожидаем
+                    // Команды выполняются мгновенно, таймаут чтения вывода ожидаем
                 }
 
                 Result.success(outputBuilder.toString().trim())
@@ -165,12 +122,15 @@ class AdbClient(
         val startTotal = System.currentTimeMillis()
         var tcpConnectMs = 0L
         try {
-            kotlinx.coroutines.withTimeout(2500L) {
+            kotlinx.coroutines.withTimeout(5000L) {
                 Socket().use { socket ->
+                    socket.reuseAddress = true
                     socket.tcpNoDelay = true
-                    socket.soTimeout = 2000
+                    socket.setSoLinger(true, 0)
+                    socket.soTimeout = 3500
+
                     val startTcp = System.currentTimeMillis()
-                    socket.connect(InetSocketAddress(host, port), 2000)
+                    socket.connect(InetSocketAddress(host, port), 3500)
                     tcpConnectMs = System.currentTimeMillis() - startTcp
 
                     val out = socket.getOutputStream()
@@ -208,10 +168,10 @@ class AdbClient(
             }
         } catch (e: Exception) {
             val err = when (e) {
-                is java.net.SocketTimeoutException -> "Таймаут сокета Станции (>2 сек)"
+                is java.net.SocketTimeoutException -> "Таймаут сокета Станции (>3.5 сек)"
                 is java.net.ConnectException -> "Порт $port отклонил подключение (${e.message ?: "нет ответа"})"
                 is java.net.NoRouteToHostException -> "Нет маршрута к $host (телефон не в домашней Wi-Fi сети)"
-                is kotlinx.coroutines.TimeoutCancellationException -> "Превышен общий лимит ожидания (2.5 сек)"
+                is kotlinx.coroutines.TimeoutCancellationException -> "Превышен общий лимит ожидания (5 сек)"
                 else -> "${e.javaClass.simpleName}: ${e.message ?: "ошибка сети"}"
             }
             ConnectionTestResult(

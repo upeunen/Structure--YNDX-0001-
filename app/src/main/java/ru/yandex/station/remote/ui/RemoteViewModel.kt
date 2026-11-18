@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import ru.yandex.station.remote.adb.AdbClient
 import ru.yandex.station.remote.adb.MediaPlaybackInfo
 import ru.yandex.station.remote.adb.StationMediaManager
@@ -125,6 +127,8 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     private var isPlaybackPaused: Boolean = false
     private var playbackMonitorJob: kotlinx.coroutines.Job? = null
     private var heartbeatJob: kotlinx.coroutines.Job? = null
+    private var manualCheckJob: kotlinx.coroutines.Job? = null
+    private val refreshMutex = Mutex()
     @Volatile
     private var isAppInForeground: Boolean = true
     private var youtubeAutoHideJob: kotlinx.coroutines.Job? = null
@@ -133,7 +137,6 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     private var lastSeekTimestamp: Long = 0L
 
     init {
-        checkConnection()
         resumeSession()
         startCommandQueueProcessor()
         viewModelScope.launch {
@@ -168,22 +171,34 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         isAppInForeground = true
         heartbeatJob?.cancel()
         heartbeatJob = viewModelScope.launch {
-            adbClient.openSession()
-            // Мгновенная проверка при включении экрана
-            refreshStationState()
-            // Цикл опроса только пока приложение на переднем плане:
-            // Если связи нет (или Wi-Fi телефона только просыпается) — быстрый опрос каждые 1.5 сек.
+            // Первая проверка при включении экрана (только если прямо сейчас не идет ручная проверка)
+            if (refreshMutex.tryLock()) {
+                try {
+                    refreshStationStateInternal(isManualCheck = false)
+                } finally {
+                    refreshMutex.unlock()
+                }
+            }
+
+            // Фоновый опрос только пока приложение на переднем плане:
+            // Если связи нет (или Wi-Fi телефона восстанавливается) — интервал 3.5 сек.
             // При стабильном подключении — спокойный интервал (4 сек для пульта, 8 сек для витрины).
             while (isAppInForeground) {
                 val isConnected = _uiState.value.connectionStatus == StationConnectionStatus.CONNECTED
                 val delayMs = when {
-                    !isConnected -> 1500L
+                    !isConnected -> 3500L
                     _uiState.value.isRemoteModalOpen -> 4000L
                     else -> 8000L
                 }
                 delay(delayMs)
                 if (isAppInForeground) {
-                    refreshStationState()
+                    if (refreshMutex.tryLock()) {
+                        try {
+                            refreshStationStateInternal(isManualCheck = false)
+                        } finally {
+                            refreshMutex.unlock()
+                        }
+                    }
                 }
             }
         }
@@ -193,21 +208,18 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         isAppInForeground = false
         heartbeatJob?.cancel()
         heartbeatJob = null
-        adbClient.closeSession()
+        manualCheckJob?.cancel()
+        manualCheckJob = null
     }
 
-    private suspend fun refreshStationState(isManualCheck: Boolean = false) {
+    private suspend fun refreshStationStateInternal(isManualCheck: Boolean = false) {
         // Если пользователь недавно нажимал кнопки (меньше 3 сек) и это не ручная проверка, не перегружаем Станцию
         if (!isManualCheck && System.currentTimeMillis() - lastUserActionTime < 3000L) {
             return
         }
 
         val prevStatus = _uiState.value.connectionStatus
-        var res = adbClient.testConnectionDetailed()
-        if (!res.isSuccess) {
-            delay(400)
-            res = adbClient.testConnectionDetailed()
-        }
+        val res = adbClient.testConnectionDetailed()
 
         if (!res.isSuccess) {
             stopPlaybackMonitor()
@@ -402,10 +414,13 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun checkConnection() {
-        viewModelScope.launch {
+        manualCheckJob?.cancel()
+        manualCheckJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(connectionStatus = StationConnectionStatus.CHECKING)
             addLog("Проверка связи со Станцией (${_uiState.value.ip}:${_uiState.value.port})...")
-            refreshStationState(isManualCheck = true)
+            refreshMutex.withLock {
+                refreshStationStateInternal(isManualCheck = true)
+            }
         }
     }
 

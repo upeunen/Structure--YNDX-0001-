@@ -59,6 +59,7 @@ data class RemoteUiState(
     val cinemaStatusMessage: String? = null,
     val activeMoviePlaying: MovieItem? = null,
     val activePlaybackSec: Long = 0L,
+    val isPlaying: Boolean = false,
     val pendingEpisodeSelection: PendingEpisodeSelection? = null,
     val pendingPeerRetry: PendingPeerRetry? = null,
     val torrServerLiveStats: TorrServerClient.ActiveTorrentStats? = null,
@@ -144,7 +145,8 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 activePositionSec = mediaInfo.positionSec
                 isPlaybackPaused = mediaInfo.state == 2
                 _uiState.value = _uiState.value.copy(
-                    activePlaybackSec = activePositionSec
+                    activePlaybackSec = activePositionSec,
+                    isPlaying = mediaInfo.isPlaying
                 )
             }
         }
@@ -240,7 +242,10 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             if (info != null && (info.isPlaying || info.state == 2 || info.state == 6)) {
                 activePositionSec = info.positionSec
                 isPlaybackPaused = info.state == 2
-                _uiState.value = _uiState.value.copy(activePlaybackSec = activePositionSec)
+                _uiState.value = _uiState.value.copy(
+                    activePlaybackSec = activePositionSec,
+                    isPlaying = info.isPlaying
+                )
             }
         }
     }
@@ -375,22 +380,32 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun tapCenter() {
+        vibrate(40)
+        executeCommand("input tap 960 540")
+        _uiState.value = _uiState.value.copy(lastMessage = "👆 Тап по центру экрана")
+    }
+
     // Управление медиаплеером YouTube / ТВ
     fun mediaPlayPause() {
         vibrate(40)
         cancelYouTubeAutoHide()
+        val nextPlaying = !_uiState.value.isPlaying
+        _uiState.value = _uiState.value.copy(isPlaying = nextPlaying)
+        isPlaybackPaused = !nextPlaying
         viewModelScope.launch {
             val info = StationMediaManager.getMediaInfo(adbClient)
             if (info != null) {
                 if (info.isPlaying) {
                     StationMediaManager.pause(adbClient)
                     isPlaybackPaused = true
+                    _uiState.value = _uiState.value.copy(isPlaying = false)
                 } else {
                     StationMediaManager.play(adbClient)
                     isPlaybackPaused = false
+                    _uiState.value = _uiState.value.copy(isPlaying = true)
                 }
             } else {
-                isPlaybackPaused = !isPlaybackPaused
                 executeCommand("media dispatch play-pause")
             }
         }
@@ -537,7 +552,11 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     fun launchAlice() {
         vibrate(50)
         stopPlaybackMonitor()
-        _uiState.value = _uiState.value.copy(activeMoviePlaying = null, lastMessage = "Остановлено: экран Алисы включен")
+        _uiState.value = _uiState.value.copy(
+            activeMoviePlaying = null,
+            isPlaying = false,
+            lastMessage = "Остановлено: экран Алисы включен"
+        )
         viewModelScope.launch {
             val cmd = "am force-stop org.videolan.vlc; am force-stop org.smarttube.stable; am force-stop org.schabi.newpipe; am force-stop top.rootu.lampa; input keyevent 86; input keyevent 3; am start -a android.intent.action.MAIN -c android.intent.category.HOME"
             val result = adbClient.execute(cmd)
@@ -596,6 +615,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                     connectionStatus = StationConnectionStatus.CONNECTED,
                     youtubeUrlInput = "",
                     youtubeHistory = youtubeHistoryRepo.getHistory(),
+                    isPlaying = true,
                     lastMessage = if (isUrl) "Видео отправлено на телевизор" else "Поиск «$text» запущен на ТВ"
                 )
                 onComplete?.invoke(true)
@@ -1096,6 +1116,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                     val liveStats = torrServerClient.getActiveTorrentStats()
                     _uiState.value = _uiState.value.copy(
                         activePlaybackSec = activePositionSec,
+                        isPlaying = (session.first == 3),
                         torrServerLiveStats = liveStats
                     )
                     historyRepo.savePlaybackProgress(torrentHash, file.id, file.name, activePositionSec)
@@ -1205,6 +1226,8 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.value = _uiState.value.copy(
                 isCinemaLoading = false,
                 activeMoviePlaying = updatedMovie.copy(title = file.name, magnetUrl = streamUrl),
+                activePlaybackSec = savedPosSec,
+                isPlaying = true,
                 cinemaMovies = if (_uiState.value.selectedCinemaCategory == "🕒 История") historyRepo.getHistory() else _uiState.value.cinemaMovies,
                 cinemaStatusMessage = okMsg,
                 lastMessage = okMsg

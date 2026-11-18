@@ -373,7 +373,12 @@ fun YouTubeScreen(
                                 modifier = Modifier.size(56.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = "Пауза/Плей", tint = Color.White, modifier = Modifier.size(32.dp))
+                                    Icon(
+                                        imageVector = if (uiState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                        contentDescription = if (uiState.isPlaying) "Пауза" else "Воспроизведение",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(32.dp)
+                                    )
                                 }
                             }
 

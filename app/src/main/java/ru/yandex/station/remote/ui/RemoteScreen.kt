@@ -2,6 +2,7 @@ package ru.yandex.station.remote.ui
 
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -125,18 +126,57 @@ fun RemoteScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Блок кнопок навигации D-Pad
-            DPadController(
-                onUp = { viewModel.sendKeyEvent(19) },
-                onDown = { viewModel.sendKeyEvent(20) },
-                onLeft = { viewModel.sendKeyEvent(21) },
-                onRight = { viewModel.sendKeyEvent(22) },
-                onOk = { viewModel.sendKeyEvent(66) }
-            )
+            // Блок кнопок навигации D-Pad и кнопка Тап возле джойстика
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Spacer(modifier = Modifier.width(54.dp))
+
+                DPadController(
+                    onUp = { viewModel.sendKeyEvent(19) },
+                    onDown = { viewModel.sendKeyEvent(20) },
+                    onLeft = { viewModel.sendKeyEvent(21) },
+                    onRight = { viewModel.sendKeyEvent(22) },
+                    onOk = { viewModel.sendKeyEvent(66) }
+                )
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                Surface(
+                    onClick = { viewModel.tapCenter() },
+                    shape = RoundedCornerShape(16.dp),
+                    color = DarkSurface,
+                    border = BorderStroke(1.5.dp, AccentYandex),
+                    modifier = Modifier.size(width = 50.dp, height = 76.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.TouchApp,
+                            contentDescription = "Тап",
+                            tint = AccentYandex,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = "Тап",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                    }
+                }
+            }
 
             // Плеер воспроизведения ТВ (Play, Pause, Плавная перемотка, Громкость, Меню, Дорожка, Субтитры)
             MediaPlaybackCard(
                 playbackSec = uiState.activePlaybackSec,
+                isPlaying = uiState.isPlaying,
                 onSeekRelative = { viewModel.seekRelativeSeconds(it) },
                 onSeekExact = { viewModel.seekToExactTime(it) },
                 onPlayPause = { viewModel.mediaPlayPause() },
@@ -162,6 +202,7 @@ fun RemoteScreen(
 @Composable
 fun MediaPlaybackCard(
     playbackSec: Long,
+    isPlaying: Boolean,
     onSeekRelative: (Long) -> Unit,
     onSeekExact: (String) -> Unit,
     onPlayPause: () -> Unit,
@@ -319,8 +360,8 @@ fun MediaPlaybackCard(
                         modifier = Modifier.fillMaxSize()
                     ) {
                         Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = "Плей / Пауза",
+                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (isPlaying) "Пауза" else "Воспроизведение",
                             tint = Color.Black,
                             modifier = Modifier.size(36.dp)
                         )

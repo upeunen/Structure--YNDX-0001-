@@ -609,7 +609,11 @@ fun CinemaScreen(
                                 modifier = Modifier.size(50.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = "Пауза/Плей", tint = Color.Black)
+                                    Icon(
+                                        imageVector = if (uiState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                        contentDescription = if (uiState.isPlaying) "Пауза" else "Воспроизведение",
+                                        tint = Color.Black
+                                    )
                                 }
                             }
 

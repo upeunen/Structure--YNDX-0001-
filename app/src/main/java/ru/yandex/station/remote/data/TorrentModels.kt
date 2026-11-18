@@ -10,7 +10,8 @@ data class MovieItem(
     val magnetUrl: String,
     val category: String = "Новинки",
     val description: String = "",
-    val isFavorite: Boolean = false
+    val isFavorite: Boolean = false,
+    val posterUrl: String = ""
 )
 
 data class TorrServerAddResponse(

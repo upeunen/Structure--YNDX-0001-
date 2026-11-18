@@ -12,6 +12,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import ru.yandex.station.remote.adb.AdbClient
 import ru.yandex.station.remote.adb.MediaPlaybackInfo
@@ -68,7 +69,17 @@ data class RemoteUiState(
     val pendingEpisodeSelection: PendingEpisodeSelection? = null,
     val pendingPeerRetry: PendingPeerRetry? = null,
     val torrServerLiveStats: TorrServerClient.ActiveTorrentStats? = null,
-    val debugLogs: List<String> = emptyList()
+    val debugLogs: List<String> = emptyList(),
+    // Витрина онлайн-кинотеатра и подборки
+    val movieSections: List<MovieSection> = emptyList(),
+    val isMovieCatalogLoading: Boolean = false,
+    val selectedCatalogMovie: MovieCatalogItem? = null,
+    val movieReleases: List<TorrentRelease> = emptyList(),
+    val isLoadingReleases: Boolean = false,
+    val releasesError: String? = null,
+    val catalogSearchQuery: String = "",
+    val catalogSearchResults: List<MovieCatalogItem> = emptyList(),
+    val isSearchingCatalog: Boolean = false
 )
 
 class RemoteViewModel(application: Application) : AndroidViewModel(application) {
@@ -126,16 +137,25 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             ensureTorrServerRunning(notifyIfStarted = false)
         }
         resolveOldYouTubeHistoryTitles()
+        viewModelScope.launch {
+            loadMovieCatalog()
+        }
     }
 
     private fun startCommandQueueProcessor() {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            for (cmd in fastCommandChannel) {
-                val res = adbClient.executeFast(cmd)
-                if (res.isSuccess) {
-                    if (_uiState.value.connectionStatus != StationConnectionStatus.CONNECTED) {
-                        _uiState.value = _uiState.value.copy(connectionStatus = StationConnectionStatus.CONNECTED)
+            while (isActive) {
+                try {
+                    for (cmd in fastCommandChannel) {
+                        val res = adbClient.executeFast(cmd)
+                        if (res.isSuccess) {
+                            if (_uiState.value.connectionStatus != StationConnectionStatus.CONNECTED) {
+                                _uiState.value = _uiState.value.copy(connectionStatus = StationConnectionStatus.CONNECTED)
+                            }
+                        }
                     }
+                } catch (_: Exception) {
+                    kotlinx.coroutines.delay(500)
                 }
             }
         }
@@ -144,6 +164,13 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     fun resumeSession() {
         viewModelScope.launch {
             adbClient.openSession()
+            // Мгновенная проверка связи при включении экрана
+            refreshStationState()
+            // Мягкая повторная проверка через 1.5 сек, когда Wi-Fi окончательно проснулся
+            delay(1500)
+            if (_uiState.value.connectionStatus != StationConnectionStatus.CONNECTED) {
+                refreshStationState()
+            }
         }
     }
 
@@ -166,7 +193,11 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         if (System.currentTimeMillis() - lastUserActionTime < 4000L) {
             return
         }
-        val isOk = adbClient.testConnection()
+        var isOk = adbClient.testConnection()
+        if (!isOk) {
+            delay(600)
+            isOk = adbClient.testConnection()
+        }
         if (!isOk) {
             stopPlaybackMonitor()
             _uiState.value = _uiState.value.copy(
@@ -434,29 +465,15 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.value = _uiState.value.copy(lastMessage = "👆 Тап по центру экрана")
     }
 
-    // Управление медиаплеером YouTube / ТВ
+    // Управление медиаплеером YouTube / ТВ (мгновенное переключение с первого тапа)
     fun mediaPlayPause() {
         vibrate(40)
         cancelYouTubeAutoHide()
+        lastUserActionTime = System.currentTimeMillis()
         val nextPlaying = !_uiState.value.isPlaying
         _uiState.value = _uiState.value.copy(isPlaying = nextPlaying)
         isPlaybackPaused = !nextPlaying
-        viewModelScope.launch {
-            val info = StationMediaManager.getMediaInfo(adbClient)
-            if (info != null) {
-                if (info.isPlaying) {
-                    StationMediaManager.pause(adbClient)
-                    isPlaybackPaused = true
-                    _uiState.value = _uiState.value.copy(isPlaying = false)
-                } else {
-                    StationMediaManager.play(adbClient)
-                    isPlaybackPaused = false
-                    _uiState.value = _uiState.value.copy(isPlaying = true)
-                }
-            } else {
-                executeCommand("media dispatch play-pause")
-            }
-        }
+        fastCommandChannel.trySend("input keyevent 85")
     }
 
     fun mediaRewind() {
@@ -1164,9 +1181,10 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                     isPlaybackPaused = session.first == 2
                     activePositionSec = session.second / 1000L
                     val liveStats = torrServerClient.getActiveTorrentStats()
+                    val isRecentAction = (System.currentTimeMillis() - lastUserActionTime < 3500L)
                     _uiState.value = _uiState.value.copy(
                         activePlaybackSec = activePositionSec,
-                        isPlaying = (session.first == 3),
+                        isPlaying = if (isRecentAction) _uiState.value.isPlaying else (session.first == 3),
                         torrServerLiveStats = liveStats
                     )
                     historyRepo.savePlaybackProgress(torrentHash, file.id, file.name, activePositionSec)
@@ -1580,6 +1598,93 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             // Если открыт SmartTube, посылаем горячую клавишу закладки 30 (B) и фиксируем в истории
             adbClient.execute("input keyevent 30")
             bookmarkCurrentYouTubeVideo()
+        }
+    }
+
+    // === Управление онлайн-витриной и раздачами ===
+
+    fun loadMovieCatalog() {
+        if (_uiState.value.isMovieCatalogLoading) return
+        _uiState.value = _uiState.value.copy(isMovieCatalogLoading = true)
+        viewModelScope.launch {
+            val sections = MovieCatalogService.loadMainSections()
+            _uiState.value = _uiState.value.copy(
+                movieSections = sections,
+                isMovieCatalogLoading = false
+            )
+        }
+    }
+
+    fun selectMovieForReleases(movie: MovieCatalogItem) {
+        vibrate(30)
+        _uiState.value = _uiState.value.copy(
+            selectedCatalogMovie = movie,
+            isLoadingReleases = true,
+            movieReleases = emptyList(),
+            releasesError = null
+        )
+        viewModelScope.launch {
+            val list = TorrentSearchService.searchReleases(
+                movieTitle = movie.title,
+                originalTitle = movie.originalTitle,
+                year = movie.releaseYear
+            )
+            _uiState.value = _uiState.value.copy(
+                movieReleases = list,
+                isLoadingReleases = false,
+                releasesError = if (list.isEmpty()) "Раздач для «${movie.title}» не найдено" else null
+            )
+        }
+    }
+
+    fun dismissMovieReleases() {
+        _uiState.value = _uiState.value.copy(
+            selectedCatalogMovie = null,
+            movieReleases = emptyList(),
+            isLoadingReleases = false,
+            releasesError = null
+        )
+    }
+
+    fun playRelease(release: TorrentRelease, movie: MovieCatalogItem) {
+        vibrate(40)
+        dismissMovieReleases()
+        val movieItem = MovieItem(
+            id = "movie_" + System.currentTimeMillis(),
+            title = movie.title,
+            year = movie.releaseYear,
+            quality = release.size,
+            size = release.size,
+            seeds = release.seeds,
+            category = movie.genre.ifBlank { "Кинозал" },
+            magnetUrl = release.magnetUrl,
+            description = release.title,
+            posterUrl = movie.posterUrl
+        )
+        playMovieOnStation(movieItem)
+    }
+
+    fun setCatalogSearchQuery(query: String) {
+        _uiState.value = _uiState.value.copy(catalogSearchQuery = query)
+        if (query.isBlank()) {
+            _uiState.value = _uiState.value.copy(catalogSearchResults = emptyList(), isSearchingCatalog = false)
+        }
+    }
+
+    fun searchCatalog(query: String) {
+        vibrate(25)
+        val q = query.trim()
+        if (q.isBlank()) {
+            _uiState.value = _uiState.value.copy(catalogSearchResults = emptyList(), isSearchingCatalog = false)
+            return
+        }
+        _uiState.value = _uiState.value.copy(isSearchingCatalog = true)
+        viewModelScope.launch {
+            val results = MovieCatalogService.searchMovies(q)
+            _uiState.value = _uiState.value.copy(
+                catalogSearchResults = results,
+                isSearchingCatalog = false
+            )
         }
     }
 

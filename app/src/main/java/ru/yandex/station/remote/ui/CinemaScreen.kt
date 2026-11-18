@@ -183,6 +183,15 @@ fun CinemaScreen(
                 },
                 actions = {
                     IconButton(
+                        onClick = { viewModel.generateRandomSelection() }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shuffle,
+                            contentDescription = "Случайная подборка",
+                            tint = AccentYandex
+                        )
+                    }
+                    IconButton(
                         onClick = { viewModel.loadMovieCatalog() },
                         enabled = !uiState.isMovieCatalogLoading
                     ) {
@@ -594,14 +603,23 @@ fun MovieCard(
                     .fillMaxWidth()
                     .height(185.dp)
                     .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
-                    .background(DarkSurfaceElevated)
+                    .background(DarkSurfaceElevated),
+                contentAlignment = Alignment.Center
             ) {
-                AsyncImage(
-                    model = movie.posterUrl,
-                    contentDescription = movie.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+                Icon(
+                    imageVector = Icons.Default.Movie,
+                    contentDescription = null,
+                    tint = TextSecondary.copy(alpha = 0.35f),
+                    modifier = Modifier.size(40.dp)
                 )
+                if (movie.posterUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = movie.posterUrl,
+                        contentDescription = movie.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
                 if (movie.rating > 0.0) {
                     Surface(
                         color = Color.Black.copy(alpha = 0.75f),

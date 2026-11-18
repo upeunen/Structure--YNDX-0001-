@@ -73,7 +73,7 @@ data class RemoteUiState(
     val torrServerLiveStats: TorrServerClient.ActiveTorrentStats? = null,
     val debugLogs: List<String> = emptyList(),
     // Витрина онлайн-кинотеатра и подборки
-    val movieSections: List<MovieSection> = emptyList(),
+    val movieSections: List<MovieSection> = MovieCatalogService.loadBuiltinSections(),
     val isMovieCatalogLoading: Boolean = false,
     val selectedCatalogMovie: MovieCatalogItem? = null,
     val movieReleases: List<TorrentRelease> = emptyList(),
@@ -1646,7 +1646,18 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 movieSections = sections,
                 isMovieCatalogLoading = false
             )
+            addLog("Кинозал: подборки обновлены (${sections.size} категорий)")
         }
+    }
+
+    fun generateRandomSelection() {
+        vibrate(25)
+        val randomSec = MovieCatalogService.getRandomSection()
+        val existing = _uiState.value.movieSections.filter { !it.id.startsWith("random") }
+        _uiState.value = _uiState.value.copy(
+            movieSections = listOf(randomSec) + existing
+        )
+        addLog("Кинозал: сгенерирована случайная подборка (${randomSec.movies.size} фильмов)")
     }
 
     fun selectMovieForReleases(movie: MovieCatalogItem) {

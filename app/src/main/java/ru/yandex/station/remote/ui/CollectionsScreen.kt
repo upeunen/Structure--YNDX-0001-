@@ -164,7 +164,10 @@ fun CollectionsScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = { webViewRef?.loadUrl(RUTRACKER_COLLECTIONS_URL) }) {
+                        IconButton(onClick = {
+                            viewModel.saveLastRutrackerUrl(RUTRACKER_COLLECTIONS_URL)
+                            webViewRef?.loadUrl(RUTRACKER_COLLECTIONS_URL)
+                        }) {
                             Icon(
                                 imageVector = Icons.Default.Home,
                                 contentDescription = "Раздел кино",
@@ -216,6 +219,16 @@ fun CollectionsScreen(
                         setBackgroundColor(android.graphics.Color.BLACK)
                         CookieManager.getInstance().setAcceptCookie(true)
                         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+
+                        addJavascriptInterface(
+                            object {
+                                @android.webkit.JavascriptInterface
+                                fun bookmark(url: String, title: String) {
+                                    viewModel.addToWatchLaterFromBrowser(url, title)
+                                }
+                            },
+                            "PultBridge"
+                        )
 
                         settings.apply {
                             javaScriptEnabled = true
@@ -272,9 +285,12 @@ fun CollectionsScreen(
 
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 isLoading = false
-                                // Сохраняем cookies/сессию RuTracker на диск
                                 CookieManager.getInstance().flush()
-                                // Элегантная подмена кнопок «Скачать» на «Запустить на ТВ» поверх схемы RuTracker
+                                url?.let {
+                                    if (it.startsWith("http", ignoreCase = true) && !it.contains("dl.php", ignoreCase = true)) {
+                                        viewModel.saveLastRutrackerUrl(it)
+                                    }
+                                }
                                 val js = """
                                     (function() {
                                         var links = document.querySelectorAll('a.dl-link, a[href*="dl.php"], a.magnet-link, a[href^="magnet:"]');
@@ -291,6 +307,56 @@ fun CollectionsScreen(
                                             a.style.display = 'inline-block';
                                             a.style.textDecoration = 'none';
                                             a.style.margin = '4px 0';
+                                            a.style.userSelect = 'none';
+
+                                            (function(elem) {
+                                                var pressTimer = null;
+                                                var isLong = false;
+
+                                                function startTimer() {
+                                                    isLong = false;
+                                                    pressTimer = setTimeout(function() {
+                                                        isLong = true;
+                                                        if (window.PultBridge) {
+                                                            window.PultBridge.bookmark(elem.href, document.title);
+                                                        }
+                                                        var origBg = elem.style.background;
+                                                        var origText = elem.textContent;
+                                                        elem.textContent = '📌 В «Смотреть позже»!';
+                                                        elem.style.background = '#4CAF50';
+                                                        elem.style.color = '#FFFFFF';
+                                                        setTimeout(function() {
+                                                            elem.textContent = origText;
+                                                            elem.style.background = origBg;
+                                                            elem.style.color = '#000000';
+                                                        }, 2000);
+                                                    }, 500);
+                                                }
+
+                                                function clearTimer() {
+                                                    if (pressTimer) {
+                                                        clearTimeout(pressTimer);
+                                                        pressTimer = null;
+                                                    }
+                                                }
+
+                                                elem.addEventListener('touchstart', startTimer, {passive: true});
+                                                elem.addEventListener('touchend', function(e) {
+                                                    if (isLong) {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                    }
+                                                    clearTimer();
+                                                });
+                                                elem.addEventListener('touchmove', clearTimer, {passive: true});
+                                                elem.addEventListener('touchcancel', clearTimer, {passive: true});
+                                                elem.addEventListener('contextmenu', function(e) {
+                                                    e.preventDefault();
+                                                    if (window.PultBridge) {
+                                                        window.PultBridge.bookmark(elem.href, document.title);
+                                                    }
+                                                });
+                                            })(a);
                                         }
                                     })();
                                 """.trimIndent()
@@ -313,7 +379,8 @@ fun CollectionsScreen(
                             }
                         }
 
-                        loadUrl(RUTRACKER_COLLECTIONS_URL)
+                        val startUrl = viewModel.getLastRutrackerUrl().ifEmpty { RUTRACKER_COLLECTIONS_URL }
+                        loadUrl(startUrl)
                         webViewRef = this
                     }
                 }

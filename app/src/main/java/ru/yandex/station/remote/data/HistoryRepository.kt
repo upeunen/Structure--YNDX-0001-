@@ -12,6 +12,7 @@ class HistoryRepository(context: Context) {
     companion object {
         private const val KEY_HISTORY = "history_list"
         private const val KEY_FAVORITES = "favorites_list"
+        private const val KEY_WATCH_LATER = "watch_later_list"
         private const val KEY_PROGRESS_PREFIX = "progress_"
         private const val KEY_LAST_FILE_PREFIX = "last_file_"
     }
@@ -64,12 +65,42 @@ class HistoryRepository(context: Context) {
         saveList(KEY_HISTORY, current)
     }
 
+    fun removeFromHistory(movieId: String) {
+        val current = getHistory().toMutableList()
+        current.removeAll { it.id == movieId }
+        saveList(KEY_HISTORY, current)
+    }
+
     fun getFavorites(): List<MovieItem> {
         return readList(KEY_FAVORITES)
     }
 
+    fun getWatchLater(): List<MovieItem> {
+        return readList(KEY_WATCH_LATER)
+    }
+
+    fun addToWatchLater(movie: MovieItem) {
+        val current = getWatchLater().toMutableList()
+        current.removeAll { it.id == movie.id || it.magnetUrl == movie.magnetUrl }
+        current.add(0, movie.copy(category = "Смотреть позже"))
+        if (current.size > 100) current.removeAt(current.size - 1)
+        saveList(KEY_WATCH_LATER, current)
+    }
+
+    fun removeFromWatchLater(movieId: String) {
+        val current = getWatchLater().toMutableList()
+        current.removeAll { it.id == movieId }
+        saveList(KEY_WATCH_LATER, current)
+    }
+
     fun isFavorite(movieId: String): Boolean {
         return getFavorites().any { it.id == movieId }
+    }
+
+    fun removeFromFavorites(movieId: String) {
+        val current = getFavorites().toMutableList()
+        current.removeAll { it.id == movieId }
+        saveList(KEY_FAVORITES, current)
     }
 
     fun toggleFavorite(movie: MovieItem): Boolean {

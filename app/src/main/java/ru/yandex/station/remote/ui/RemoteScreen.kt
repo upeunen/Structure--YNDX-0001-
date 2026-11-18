@@ -32,7 +32,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -123,83 +125,20 @@ fun RemoteScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Переключатель режима: Кнопки / Клавиатура & RuTracker
-            TabRow(
-                selectedTabIndex = when (uiState.activeTab) {
-                    RemoteTab.REMOTE -> 0
-                    RemoteTab.KEYBOARD -> 1
-                },
-                containerColor = DarkSurface,
-                contentColor = AccentYandex,
-                indicator = {},
-                divider = {},
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .padding(4.dp)
-            ) {
-                Tab(
-                    selected = uiState.activeTab == RemoteTab.REMOTE,
-                    onClick = { viewModel.setActiveTab(RemoteTab.REMOTE) },
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(
-                            if (uiState.activeTab == RemoteTab.REMOTE) DarkSurfaceElevated else Color.Transparent
-                        )
-                        .padding(vertical = 10.dp)
-                ) {
-                    Text(
-                        text = "Пульт",
-                        fontWeight = if (uiState.activeTab == RemoteTab.REMOTE) FontWeight.Bold else FontWeight.Normal,
-                        color = if (uiState.activeTab == RemoteTab.REMOTE) TextPrimary else TextSecondary,
-                        fontSize = 13.sp
-                    )
-                }
-
-                Tab(
-                    selected = uiState.activeTab == RemoteTab.KEYBOARD,
-                    onClick = { viewModel.setActiveTab(RemoteTab.KEYBOARD) },
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(
-                            if (uiState.activeTab == RemoteTab.KEYBOARD) DarkSurfaceElevated else Color.Transparent
-                        )
-                        .padding(vertical = 10.dp)
-                ) {
-                    Text(
-                        text = "Ввод текста",
-                        fontWeight = if (uiState.activeTab == RemoteTab.KEYBOARD) FontWeight.Bold else FontWeight.Normal,
-                        color = if (uiState.activeTab == RemoteTab.KEYBOARD) TextPrimary else TextSecondary,
-                        fontSize = 13.sp
-                    )
-                }
-            }
-
-            // Основная зона управления по выбранной вкладке
-            when (uiState.activeTab) {
-                RemoteTab.REMOTE -> {
-                    DPadController(
-                        onUp = { viewModel.sendKeyEvent(19) },
-                        onDown = { viewModel.sendKeyEvent(20) },
-                        onLeft = { viewModel.sendKeyEvent(21) },
-                        onRight = { viewModel.sendKeyEvent(22) },
-                        onOk = { viewModel.sendKeyEvent(66) }
-                    )
-                }
-                RemoteTab.KEYBOARD -> {
-                    RuTrackerAndKeyboardCard(
-                        keyboardInput = uiState.keyboardInput,
-                        onKeyboardInputChange = { viewModel.setKeyboardInput(it) },
-                        onSendText = { viewModel.sendText(it) },
-                        onSendKeyEvent = { viewModel.sendKeyEvent(it) }
-                    )
-                }
-            }
+            // Блок кнопок навигации D-Pad
+            DPadController(
+                onUp = { viewModel.sendKeyEvent(19) },
+                onDown = { viewModel.sendKeyEvent(20) },
+                onLeft = { viewModel.sendKeyEvent(21) },
+                onRight = { viewModel.sendKeyEvent(22) },
+                onOk = { viewModel.sendKeyEvent(66) }
+            )
 
             // Плеер воспроизведения ТВ (Play, Pause, Плавная перемотка, Громкость, Меню, Дорожка, Субтитры)
             MediaPlaybackCard(
                 playbackSec = uiState.activePlaybackSec,
                 onSeekRelative = { viewModel.seekRelativeSeconds(it) },
+                onSeekExact = { viewModel.seekToExactTime(it) },
                 onPlayPause = { viewModel.mediaPlayPause() },
                 onRewind = { viewModel.mediaRewind() },
                 onFastForward = { viewModel.mediaFastForward() },
@@ -210,13 +149,9 @@ fun RemoteScreen(
                 onVolumeMute = { viewModel.volumeMute() },
                 onBack = { viewModel.sendKeyEvent(4) },
                 onMenu = { viewModel.sendKeyEvent(82) },
-                onAudioTrack = { viewModel.sendKeyEvent(30) },
-                onSubtitles = { viewModel.sendKeyEvent(50) }
-            )
-
-            // Простой экранный тачпад: нажатие в любую точку пропорционально нажимает на экран ТВ (1920x1080)
-            TvTapAreaCard(
-                onTapNormalized = { nx, ny -> viewModel.tapOnTvScreen(nx, ny) }
+                onAudioTrack = { viewModel.switchAudioTrack() },
+                onSubtitles = { viewModel.toggleSubtitles() },
+                onBookmark = { viewModel.bookmarkCurrentMedia() }
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -225,158 +160,10 @@ fun RemoteScreen(
 }
 
 @Composable
-fun TvTapAreaCard(
-    onTapNormalized: (Float, Float) -> Unit
-) {
-    var lastTap by remember { mutableStateOf<Offset?>(null) }
-
-    Card(
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = "ТАП ПО ЭКРАНУ ТВ (НАЖМИТЕ В НУЖНОЕ МЕСТО)",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextSecondary,
-                letterSpacing = 0.8.sp
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF101014))
-                    .border(1.dp, DarkSurfaceElevated, RoundedCornerShape(12.dp))
-                    .pointerInput(Unit) {
-                        detectTapGestures { offset ->
-                            val nx = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
-                            val ny = (offset.y / size.height.toFloat()).coerceIn(0f, 1f)
-                            lastTap = Offset(nx, ny)
-                            onTapNormalized(nx, ny)
-                        }
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val grid = Color(0xFF222228)
-                    drawLine(grid, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), strokeWidth = 1f)
-                    drawLine(grid, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = 1f)
-                    lastTap?.let { pt ->
-                        val cx = pt.x * size.width
-                        val cy = pt.y * size.height
-                        drawCircle(AccentYandex.copy(alpha = 0.3f), radius = 20f, center = Offset(cx, cy))
-                        drawCircle(AccentYandex, radius = 6f, center = Offset(cx, cy))
-                    }
-                }
-                Text(
-                    text = "Экран ТВ 16:9",
-                    color = TextSecondary.copy(alpha = 0.45f),
-                    fontSize = 12.sp
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun RuTrackerAndKeyboardCard(
-    keyboardInput: String,
-    onKeyboardInputChange: (String) -> Unit,
-    onSendText: (String) -> Unit,
-    onSendKeyEvent: (Int) -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        // Блок свободной клавиатуры смартфона для ТВ
-        Card(
-            colors = CardDefaults.cardColors(containerColor = DarkSurface),
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text = "БЫСТРЫЙ ВВОД ТЕКСТА НА ТЕЛЕВИЗОР",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextSecondary,
-                    letterSpacing = 1.sp
-                )
-
-                OutlinedTextField(
-                    value = keyboardInput,
-                    onValueChange = onKeyboardInputChange,
-                    placeholder = {
-                        Text("Введите любой текст или поисковый запрос...", color = TextSecondary, fontSize = 13.sp)
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentYandex,
-                        unfocusedBorderColor = DarkSurfaceElevated,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        cursorColor = AccentYandex
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            onSendText(keyboardInput)
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = AccentBlue,
-                            contentColor = Color.White
-                        ),
-                        modifier = Modifier.weight(1.3f)
-                    ) {
-                        Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Отправить", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    }
-
-                    OutlinedButton(
-                        onClick = { onSendKeyEvent(67) }, // BACKSPACE
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-                        modifier = Modifier.weight(0.9f)
-                    ) {
-                        Text("Стереть ⌫", fontSize = 12.sp)
-                    }
-
-                    OutlinedButton(
-                        onClick = { onSendKeyEvent(66) }, // ENTER
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-                        modifier = Modifier.weight(0.8f)
-                    ) {
-                        Text("Enter ↵", fontSize = 12.sp)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 fun MediaPlaybackCard(
     playbackSec: Long,
     onSeekRelative: (Long) -> Unit,
+    onSeekExact: (String) -> Unit,
     onPlayPause: () -> Unit,
     onRewind: () -> Unit,
     onFastForward: () -> Unit,
@@ -388,11 +175,14 @@ fun MediaPlaybackCard(
     onBack: () -> Unit,
     onMenu: () -> Unit,
     onAudioTrack: () -> Unit,
-    onSubtitles: () -> Unit
+    onSubtitles: () -> Unit,
+    onBookmark: () -> Unit
 ) {
     val mins = playbackSec / 60
     val secs = playbackSec % 60
     val timeLabel = String.format(java.util.Locale.US, "%02d:%02d", mins, secs)
+    var exactTimeText by remember { mutableStateOf("") }
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     Card(
         colors = CardDefaults.cardColors(containerColor = DarkSurface),
@@ -429,10 +219,12 @@ fun MediaPlaybackCard(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 listOf(
+                    -300L to "−5 мин",
                     -60L to "−1 мин",
                     -10L to "−10 сек",
                     10L to "+10 сек",
-                    60L to "+1 мин"
+                    60L to "+1 мин",
+                    300L to "+5 мин"
                 ).forEach { (delta, label) ->
                     OutlinedButton(
                         onClick = { onSeekRelative(delta) },
@@ -442,6 +234,52 @@ fun MediaPlaybackCard(
                     ) {
                         Text(label, fontSize = 11.sp, color = TextPrimary, maxLines = 1)
                     }
+                }
+            }
+
+            // Ввод времени вручную для мгновенного перехода
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = exactTimeText,
+                    onValueChange = { exactTimeText = it },
+                    placeholder = { Text("Время (напр. 15:30 или 45)", fontSize = 12.sp, color = TextSecondary) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Go),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AccentYandex,
+                        unfocusedBorderColor = DarkSurfaceElevated,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        cursorColor = AccentYandex
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f),
+                    trailingIcon = {
+                        if (exactTimeText.isNotEmpty()) {
+                            IconButton(onClick = { exactTimeText = "" }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Очистить", tint = TextSecondary, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                )
+
+                Button(
+                    onClick = {
+                        keyboardController?.hide()
+                        if (exactTimeText.isNotBlank()) {
+                            onSeekExact(exactTimeText)
+                            exactTimeText = ""
+                        }
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentYandex),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Text("Перейти", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
             }
 
@@ -541,26 +379,34 @@ fun MediaPlaybackCard(
                 )
             }
 
-            // Быстрые кнопки VLC: Звуковая дорожка и Субтитры
+            // Быстрые кнопки: Звуковая дорожка, Субтитры и Закладка
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 OutlinedButton(
                     onClick = onAudioTrack,
                     shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("🔊 Аудиодорожка", fontSize = 12.sp, color = TextPrimary, maxLines = 1)
+                    Text("🔊 Дорожка", fontSize = 11.sp, color = TextPrimary, maxLines = 1)
                 }
                 OutlinedButton(
                     onClick = onSubtitles,
                     shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("💬 Субтитры", fontSize = 12.sp, color = TextPrimary, maxLines = 1)
+                    Text("💬 Субтитры", fontSize = 11.sp, color = TextPrimary, maxLines = 1)
+                }
+                OutlinedButton(
+                    onClick = onBookmark,
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("⭐ Закладка", fontSize = 11.sp, color = AccentYandex, maxLines = 1)
                 }
             }
         }

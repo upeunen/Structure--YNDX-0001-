@@ -59,6 +59,23 @@ class YouTubeHistoryRepository(context: Context) {
         prefs.edit().putString(KEY_HISTORY, jsonArray.toString()).apply()
     }
 
+    fun removeFromHistory(id: String) {
+        val current = getHistory().toMutableList()
+        current.removeAll { it.id == id }
+        val jsonArray = JSONArray()
+        for (it in current) {
+            val obj = JSONObject().apply {
+                put("id", it.id)
+                put("title", it.title)
+                put("urlOrQuery", it.urlOrQuery)
+                put("isUrl", it.isUrl)
+                put("timestamp", it.timestamp)
+            }
+            jsonArray.put(obj)
+        }
+        prefs.edit().putString(KEY_HISTORY, jsonArray.toString()).apply()
+    }
+
     fun clearHistory() {
         prefs.edit().remove(KEY_HISTORY).apply()
     }

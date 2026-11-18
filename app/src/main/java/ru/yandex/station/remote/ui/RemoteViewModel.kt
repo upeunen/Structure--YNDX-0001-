@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import ru.yandex.station.remote.adb.AdbClient
+import ru.yandex.station.remote.adb.MediaPlaybackInfo
+import ru.yandex.station.remote.adb.StationMediaManager
 import ru.yandex.station.remote.data.*
 
 enum class StationConnectionStatus {
@@ -102,7 +104,9 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     private var isPlaybackPaused: Boolean = false
     private var playbackMonitorJob: kotlinx.coroutines.Job? = null
     private var youtubeAutoHideJob: kotlinx.coroutines.Job? = null
+    private var playerMissCount = 0
     private var seekJob: kotlinx.coroutines.Job? = null
+    private var lastSeekTimestamp: Long = 0L
 
     init {
         checkConnection()
@@ -116,7 +120,8 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     private fun startConnectionHeartbeat() {
         viewModelScope.launch {
             while (true) {
-                delay(30000L)
+                val delayMs = if (_uiState.value.isRemoteModalOpen) 4000L else 20000L
+                delay(delayMs)
                 refreshStationState()
             }
         }
@@ -127,21 +132,39 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         if (!isOk) {
             stopPlaybackMonitor()
             _uiState.value = _uiState.value.copy(
-                connectionStatus = StationConnectionStatus.UNAVAILABLE,
-                activeMoviePlaying = null
+                connectionStatus = StationConnectionStatus.UNAVAILABLE
             )
             return
         }
-        var stillPlaying = _uiState.value.activeMoviePlaying
-        if (stillPlaying != null) {
-            val psRes = adbClient.execute("ps | grep -iE \"vlc|fireplayer\"")
-            val running = psRes.getOrNull().orEmpty()
-            if (psRes.isSuccess && !running.contains("vlc") && !running.contains("fireplayer")) {
-                stopPlaybackMonitor()
-                stillPlaying = null
+
+        // Синхронизация реального времени воспроизведения с ТВ (SmartTube или VLC)
+        if (_uiState.value.isRemoteModalOpen) {
+            val mediaInfo = StationMediaManager.getMediaInfo(adbClient)
+            if (mediaInfo != null && (mediaInfo.isPlaying || mediaInfo.state == 2 || mediaInfo.state == 6)) {
+                activePositionSec = mediaInfo.positionSec
+                isPlaybackPaused = mediaInfo.state == 2
+                _uiState.value = _uiState.value.copy(
+                    activePlaybackSec = activePositionSec
+                )
             }
         }
+
         val liveStats = torrServerClient.getActiveTorrentStats()
+        var stillPlaying = _uiState.value.activeMoviePlaying
+        if (stillPlaying != null && liveStats == null) {
+            val psRes = adbClient.execute("ps | grep -i vlc")
+            val running = psRes.getOrNull().orEmpty()
+            if (psRes.isSuccess && !running.contains("vlc")) {
+                playerMissCount++
+                if (playerMissCount >= 3) {
+                    stopPlaybackMonitor()
+                    stillPlaying = null
+                    playerMissCount = 0
+                }
+            } else {
+                playerMissCount = 0
+            }
+        }
         _uiState.value = _uiState.value.copy(
             connectionStatus = StationConnectionStatus.CONNECTED,
             activeMoviePlaying = stillPlaying,
@@ -211,6 +234,15 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         vibrate(25)
         _uiState.value = _uiState.value.copy(isRemoteModalOpen = true)
         checkConnection()
+        viewModelScope.launch {
+            StationMediaManager.ensureDeployed(getApplication(), adbClient)
+            val info = StationMediaManager.getMediaInfo(adbClient)
+            if (info != null && (info.isPlaying || info.state == 2 || info.state == 6)) {
+                activePositionSec = info.positionSec
+                isPlaybackPaused = info.state == 2
+                _uiState.value = _uiState.value.copy(activePlaybackSec = activePositionSec)
+            }
+        }
     }
 
     fun closeRemoteModal() {
@@ -347,36 +379,110 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     fun mediaPlayPause() {
         vibrate(40)
         cancelYouTubeAutoHide()
-        isPlaybackPaused = !isPlaybackPaused
-        executeCommand("input keyevent 85")
+        viewModelScope.launch {
+            val info = StationMediaManager.getMediaInfo(adbClient)
+            if (info != null) {
+                if (info.isPlaying) {
+                    StationMediaManager.pause(adbClient)
+                    isPlaybackPaused = true
+                } else {
+                    StationMediaManager.play(adbClient)
+                    isPlaybackPaused = false
+                }
+            } else {
+                isPlaybackPaused = !isPlaybackPaused
+                executeCommand("media dispatch play-pause")
+            }
+        }
     }
 
     fun mediaRewind() {
-        vibrate(30)
-        cancelYouTubeAutoHide()
-        activePositionSec = (activePositionSec - 10L).coerceAtLeast(0L)
-        executeCommand("input keyevent 89")
+        seekRelativeSeconds(-10L)
     }
 
     fun mediaFastForward() {
-        vibrate(30)
+        seekRelativeSeconds(10L)
+    }
+
+    fun parseTimeToSeconds(input: String): Long? {
+        val clean = input.trim().lowercase().replace(" ", "").replace("мин", "").replace("m", "").replace("м", "")
+        if (clean.isEmpty()) return null
+        val parts = clean.split(":").mapNotNull { it.toLongOrNull() }
+        return when (parts.size) {
+            1 -> {
+                val num = parts[0]
+                if (num <= 180) num * 60L else num
+            }
+            2 -> parts[0] * 60L + parts[1]
+            3 -> parts[0] * 3600L + parts[1] * 60L + parts[2]
+            else -> null
+        }
+    }
+
+    fun seekToExactTime(timeStr: String) {
+        val targetSec = parseTimeToSeconds(timeStr) ?: run {
+            _uiState.value = _uiState.value.copy(lastMessage = "Неверный формат времени (пример: 15:30 или 45)")
+            return
+        }
+        vibrate(40)
         cancelYouTubeAutoHide()
-        activePositionSec += 10L
-        _uiState.value = _uiState.value.copy(activePlaybackSec = activePositionSec)
-        executeCommand("input keyevent 90")
+
+        viewModelScope.launch {
+            StationMediaManager.ensureDeployed(getApplication(), adbClient)
+            val info = StationMediaManager.seekTo(adbClient, targetSec * 1000L)
+            if (info != null) {
+                activePositionSec = info.positionSec
+                _uiState.value = _uiState.value.copy(
+                    activePlaybackSec = info.positionSec,
+                    lastMessage = "Переход на ${formatSeconds(info.positionSec)}"
+                )
+            } else {
+                val activeMovie = _uiState.value.activeMoviePlaying
+                if (activeMovie != null && activeMovie.magnetUrl.startsWith("http")) {
+                    val streamUrl = activeMovie.magnetUrl
+                    val cmd = "am start -n org.videolan.vlc/.StartActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" --ei position ${targetSec * 1000L}"
+                    adbClient.execute(cmd)
+                } else if (_uiState.value.activeAppScreen == AppScreen.YOUTUBE && _uiState.value.youtubeUrlInput.isNotBlank()) {
+                    val url = extractUrl(_uiState.value.youtubeUrlInput).ifEmpty { _uiState.value.youtubeUrlInput }
+                    val targetUrl = if (url.contains("?")) "$url&t=${targetSec}s" else "$url?t=${targetSec}s"
+                    val cmd = "am start -a android.intent.action.VIEW -d \"$targetUrl\" -p org.smarttube.stable"
+                    adbClient.execute(cmd)
+                }
+                activePositionSec = targetSec
+                _uiState.value = _uiState.value.copy(
+                    activePlaybackSec = targetSec,
+                    lastMessage = "Переход на ${formatSeconds(targetSec)}"
+                )
+            }
+        }
     }
 
     fun seekRelativeSeconds(deltaSec: Long) {
+        val now = System.currentTimeMillis()
+        if (now - lastSeekTimestamp < 350L) {
+            return // Защита от дребезга и повторных нажатий
+        }
+        lastSeekTimestamp = now
+
         vibrate(30)
         cancelYouTubeAutoHide()
-        activePositionSec = (activePositionSec + deltaSec).coerceAtLeast(0L)
-        _uiState.value = _uiState.value.copy(activePlaybackSec = activePositionSec)
-        val keyCode = if (deltaSec >= 0) 22 else 21
-        val count = if (kotlin.math.abs(deltaSec) >= 60L) 3 else 1
-        val cmd = (1..count).joinToString("; ") { "input keyevent $keyCode" }
+
         seekJob?.cancel()
         seekJob = viewModelScope.launch {
-            adbClient.execute(cmd)
+            StationMediaManager.ensureDeployed(getApplication(), adbClient)
+            val info = StationMediaManager.seekRelative(adbClient, activePositionSec, deltaSec)
+            if (info != null) {
+                activePositionSec = info.positionSec
+                _uiState.value = _uiState.value.copy(
+                    activePlaybackSec = info.positionSec,
+                    lastMessage = "${if (deltaSec > 0) "+" else ""}${deltaSec / 60} мин (${formatSeconds(info.positionSec)})"
+                )
+            } else {
+                activePositionSec = (activePositionSec + deltaSec).coerceAtLeast(0L)
+                _uiState.value = _uiState.value.copy(activePlaybackSec = activePositionSec)
+                val action = if (deltaSec >= 0) "fast-forward" else "rewind"
+                adbClient.execute("media dispatch $action")
+            }
         }
     }
 
@@ -386,7 +492,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         if (_uiState.value.activeMoviePlaying != null && activeSeriesFiles.size > 1) {
             playPreviousEpisode()
         } else {
-            executeCommand("input keyevent 88")
+            executeCommand("media dispatch previous")
         }
     }
 
@@ -396,7 +502,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         if (_uiState.value.activeMoviePlaying != null && activeSeriesFiles.size > 1) {
             playNextEpisode()
         } else {
-            executeCommand("input keyevent 87")
+            executeCommand("media dispatch next")
         }
     }
 
@@ -404,6 +510,14 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         vibrate(30)
         cancelYouTubeAutoHide()
         executeCommand("input keyevent 164")
+    }
+
+    fun doubleTapOnTvScreen(normX: Float, normY: Float) {
+        vibrate(50)
+        cancelYouTubeAutoHide()
+        val x = (normX.coerceIn(0f, 1f) * 1920f).toInt()
+        val y = (normY.coerceIn(0f, 1f) * 1080f).toInt()
+        executeCommand("input tap $x $y; input tap $x $y")
     }
 
     fun tapOnTvScreen(normX: Float, normY: Float) {
@@ -417,7 +531,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     fun launchYouTube() {
         vibrate(50)
         stopPlaybackMonitor()
-        executeCommand("am force-stop com.softwinner.fireplayer; am force-stop com.brouken.player; am force-stop org.videolan.vlc; svc power stayon true; input keyevent 224; am start -n org.smarttube.stable/com.liskovsoft.smartyoutubetv2.tv.ui.main.SplashActivity")
+        executeCommand("am force-stop org.videolan.vlc; svc power stayon true; input keyevent 224; am start -n org.smarttube.stable/com.liskovsoft.smartyoutubetv2.tv.ui.main.SplashActivity")
     }
 
     fun launchAlice() {
@@ -425,7 +539,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         stopPlaybackMonitor()
         _uiState.value = _uiState.value.copy(activeMoviePlaying = null, lastMessage = "Остановлено: экран Алисы включен")
         viewModelScope.launch {
-            val cmd = "am force-stop com.softwinner.fireplayer; am force-stop com.brouken.player; am force-stop org.videolan.vlc; am force-stop org.smarttube.stable; am force-stop org.schabi.newpipe; am force-stop top.rootu.lampa; input keyevent 86; input keyevent 3; am start -a android.intent.action.MAIN -c android.intent.category.HOME"
+            val cmd = "am force-stop org.videolan.vlc; am force-stop org.smarttube.stable; am force-stop org.schabi.newpipe; am force-stop top.rootu.lampa; input keyevent 86; input keyevent 3; am start -a android.intent.action.MAIN -c android.intent.category.HOME"
             val result = adbClient.execute(cmd)
             if (result.isSuccess) {
                 _uiState.value = _uiState.value.copy(connectionStatus = StationConnectionStatus.CONNECTED)
@@ -456,7 +570,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             val textWithoutUrl = text.replace(extractedUrl, "").trim().trim('-', ':', '|', '—')
             val initialTitle = textWithoutUrl.takeIf { it.length >= 2 }
                 ?: fallbackYouTubeTitle(extractedUrl)
-            cmd = "am force-stop com.softwinner.fireplayer; svc power stayon true; input keyevent 224; am start -a android.intent.action.VIEW -d \"$extractedUrl\" -p org.smarttube.stable"
+            cmd = "am force-stop org.videolan.vlc; svc power stayon true; input keyevent 224; am start -a android.intent.action.VIEW -d \"$extractedUrl\" -p org.smarttube.stable"
             historyItem = YouTubeItem(
                 id = "yt_" + System.currentTimeMillis(),
                 title = initialTitle,
@@ -465,7 +579,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             )
         } else {
             val escaped = text.replace("\"", "\\\"")
-            cmd = "am force-stop com.softwinner.fireplayer; svc power stayon true; input keyevent 224; am start -a android.intent.action.SEARCH -q \"$escaped\" -p org.smarttube.stable"
+            cmd = "am force-stop org.videolan.vlc; svc power stayon true; input keyevent 224; am start -a android.intent.action.SEARCH -q \"$escaped\" -p org.smarttube.stable"
             historyItem = YouTubeItem(
                 id = "yt_" + System.currentTimeMillis(),
                 title = text,
@@ -520,7 +634,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         val cmd = when (section) {
             "menu" -> "input keyevent 21"
             "search" -> "input keyevent 84"
-            else -> "am force-stop com.softwinner.fireplayer; svc power stayon true; input keyevent 224; am start -n org.smarttube.stable/com.liskovsoft.smartyoutubetv2.tv.ui.main.SplashActivity"
+            else -> "am force-stop org.videolan.vlc; svc power stayon true; input keyevent 224; am start -n org.smarttube.stable/com.liskovsoft.smartyoutubetv2.tv.ui.main.SplashActivity"
         }
         val label = when (section) {
             "menu" -> "Боковое меню"
@@ -642,6 +756,10 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             "⭐ Закладки" -> {
                 val favs = historyRepo.getFavorites()
                 _uiState.value = _uiState.value.copy(cinemaMovies = favs)
+            }
+            "📌 Смотреть позже" -> {
+                val later = historyRepo.getWatchLater()
+                _uiState.value = _uiState.value.copy(cinemaMovies = later)
             }
             else -> {
                 val hist = historyRepo.getHistory()
@@ -949,40 +1067,72 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         playbackMonitorJob = null
     }
 
+    // Читает реальное состояние VLC на ТВ: (state, positionMs) или null, если сессия не найдена
+    private suspend fun readVlcSession(): Pair<Int, Long>? {
+        val res = adbClient.execute("dumpsys media_session")
+        if (!res.isSuccess) return null
+        val out = res.getOrNull().orEmpty()
+        val idx = out.indexOf("org.videolan.vlc")
+        if (idx < 0) return null
+        val chunk = out.substring(idx, minOf(out.length, idx + 3000))
+        val m = Regex("state=PlaybackState \\{state=(\\d+), position=(\\d+)").find(chunk) ?: return null
+        return m.groupValues[1].toInt() to m.groupValues[2].toLong()
+    }
+
     private fun startPlaybackMonitor(torrentHash: String, file: TorrentVideoFile, movie: MovieItem) {
         stopPlaybackMonitor()
         playbackMonitorJob = viewModelScope.launch {
             var checks = 0
+            var endHits = 0
             while (true) {
                 delay(5000)
-                if (!isPlaybackPaused) {
-                    activePositionSec += 5L
+                checks++
+                val session = readVlcSession()
+                if (session != null && (session.first == 3 || session.first == 2 || session.first == 6)) {
+                    // Реальная позиция из VLC: запоминаем точно
+                    endHits = 0
+                    isPlaybackPaused = session.first == 2
+                    activePositionSec = session.second / 1000L
                     val liveStats = torrServerClient.getActiveTorrentStats()
                     _uiState.value = _uiState.value.copy(
                         activePlaybackSec = activePositionSec,
                         torrServerLiveStats = liveStats
                     )
                     historyRepo.savePlaybackProgress(torrentHash, file.id, file.name, activePositionSec)
-                }
-                checks++
-                // Каждые 10 сек (после 30 сек просмотра) проверяем, не завершилась ли серия в плеере
-                if (checks % 2 == 0 && checks >= 6 && activeSeriesFiles.size > 1 && !isPlaybackPaused) {
-                    val psRes = adbClient.execute("ps | grep -iE \"vlc|fireplayer\"")
-                    val running = psRes.getOrNull().orEmpty()
-                    if (psRes.isSuccess && !running.contains("vlc") && !running.contains("fireplayer")) {
-                        addLog("Плеер завершил серию ${file.name}")
-                        if (activeSeriesIndex + 1 < activeSeriesFiles.size) {
-                            playNextEpisode()
-                        } else {
-                            stopPlaybackMonitor()
+                } else {
+                    if (session == null && !isPlaybackPaused) {
+                        activePositionSec += 5L
+                        val liveStats = torrServerClient.getActiveTorrentStats()
+                        _uiState.value = _uiState.value.copy(
+                            activePlaybackSec = activePositionSec,
+                            torrServerLiveStats = liveStats
+                        )
+                        historyRepo.savePlaybackProgress(torrentHash, file.id, file.name, activePositionSec)
+                    }
+                    if (checks >= 6 && activeSeriesFiles.size > 1) {
+                        val stopped = session != null && (session.first == 0 || session.first == 1)
+                        var gone = false
+                        if (session == null) {
+                            val psRes = adbClient.execute("ps | grep -i vlc")
+                            val running = psRes.getOrNull().orEmpty()
+                            gone = psRes.isSuccess && !running.contains("vlc")
                         }
-                        break
+                        if (stopped || gone) endHits++ else endHits = 0
+                        if (endHits >= 2) {
+                            addLog("Плеер завершил серию ${file.name}")
+                            if (activeSeriesIndex + 1 < activeSeriesFiles.size) {
+                                historyRepo.savePlaybackProgress(torrentHash, file.id, file.name, 0L)
+                                playNextEpisode()
+                            } else {
+                                stopPlaybackMonitor()
+                            }
+                            break
+                        }
                     }
                 }
             }
         }
     }
-
     private fun formatSeconds(totalSec: Long): String {
         val h = totalSec / 3600
         val m = (totalSec % 3600) / 60
@@ -1026,16 +1176,14 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         val savedPosSec = historyRepo.getFilePositionSec(torrentHash, file.id)
         val posExtra = if (savedPosSec > 15L) "--ei position ${savedPosSec * 1000L} " else ""
         val streamUrl = torrServerClient.getStreamUrl(torrentHash, file.id)
-        // Приоритетно запускаем VLC (поддерживает .mkv/.avi, AC3/DTS, аудиодорожки и субтитры), иначе резервный fireplayer
-        val adbCmd = "am force-stop org.smarttube.stable; am force-stop org.videolan.vlc; am force-stop com.brouken.player; am force-stop com.softwinner.fireplayer; " +
-            "(svc power stayon true; settings put secure screensaver_enabled 0; input keyevent 224) >/dev/null 2>&1 & " +
-            "if pm path org.videolan.vlc >/dev/null 2>&1; then " +
-            "am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" -p org.videolan.vlc $posExtra; " +
-            "else am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" $posExtra; fi"
+        // Запускаем VLC плеер напрямую
+        val adbCmd = "am force-stop org.smarttube.stable; am force-stop org.videolan.vlc; " +
+            "(svc power stayon true; settings put secure screensaver_enabled 0; settings put secure enabled_accessibility_services ''; settings put secure accessibility_enabled 0; input keyevent 224) >/dev/null 2>&1 & " +
+            "am start -n org.videolan.vlc/.StartActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" $posExtra"
         var adbResult = adbClient.execute(adbCmd)
 
         if (!adbResult.isSuccess) {
-            adbResult = adbClient.execute("am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\"")
+            adbResult = adbClient.execute("am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" -p org.videolan.vlc $posExtra")
         }
 
         if (adbResult.isSuccess) {
@@ -1083,7 +1231,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 lastMessage = "Пауза: наполнение буфера торрента..."
             )
             // 1. Ставим плеер на паузу
-            executeCommand("input keyevent 85")
+            executeCommand("media dispatch play-pause")
 
             // 2. Будим торрент и запрашиваем наполнение кэша для точного fileId
             val activeMovie = _uiState.value.activeMoviePlaying
@@ -1114,10 +1262,10 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             // 4. Проверяем / перезапускаем плеер, если он вылетел
             if (activeMovie != null && activeMovie.magnetUrl.startsWith("http")) {
                 val streamUrl = activeMovie.magnetUrl
-                val adbCmd = "am start -n com.softwinner.fireplayer/.ui.VideoPlayerActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\""
+                val adbCmd = "am start -n org.videolan.vlc/.StartActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\""
                 adbClient.execute(adbCmd)
             } else {
-                executeCommand("input keyevent 85")
+                executeCommand("media dispatch play-pause")
             }
 
             _uiState.value = _uiState.value.copy(
@@ -1147,6 +1295,146 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
     fun clearLastMessage() {
         _uiState.value = _uiState.value.copy(lastMessage = null)
+    }
+
+    fun saveLastRutrackerUrl(url: String) {
+        if (url.startsWith("http") && !url.contains("dl.php")) {
+            prefs.lastRutrackerUrl = url
+        }
+    }
+
+    fun getLastRutrackerUrl(): String {
+        return prefs.lastRutrackerUrl
+    }
+
+    fun bookmarkFromBrowser(targetUrl: String, pageTitle: String) {
+        vibrate(55)
+        viewModelScope.launch {
+            val cleanTitle = if (pageTitle.isNotBlank() && !pageTitle.contains("RuTracker", ignoreCase = true)) {
+                pageTitle.substringBefore(" :: ").substringBefore(" [").trim()
+            } else {
+                "Раздача RuTracker"
+            }
+            val movie = MovieItem(
+                id = "bm_rt_" + (targetUrl.hashCode().toLong() and 0x7FFFFFFF),
+                title = cleanTitle,
+                quality = "HD",
+                size = "Торрент",
+                seeds = 100,
+                magnetUrl = targetUrl,
+                category = "⭐ Закладки",
+                description = "Добавлено из RuTracker: $pageTitle",
+                isFavorite = true
+            )
+            historyRepo.toggleFavorite(movie)
+            _uiState.value = _uiState.value.copy(
+                lastMessage = "⭐ Добавлено в закладки: $cleanTitle"
+            )
+        }
+    }
+
+    fun addToWatchLaterFromBrowser(targetUrl: String, pageTitle: String) {
+        vibrate(55)
+        viewModelScope.launch {
+            val cleanTitle = if (pageTitle.isNotBlank() && !pageTitle.contains("RuTracker", ignoreCase = true)) {
+                pageTitle.substringBefore(" :: ").substringBefore(" [").trim()
+            } else {
+                "Раздача RuTracker"
+            }
+            val movie = MovieItem(
+                id = "wl_rt_" + (targetUrl.hashCode().toLong() and 0x7FFFFFFF),
+                title = cleanTitle,
+                quality = "HD",
+                size = "Торрент",
+                seeds = 100,
+                magnetUrl = targetUrl,
+                category = "Смотреть позже",
+                description = "Сохранено из RuTracker: $pageTitle",
+                isFavorite = false
+            )
+            historyRepo.addToWatchLater(movie)
+            _uiState.value = _uiState.value.copy(
+                lastMessage = "📌 Добавлено в «Смотреть позже»: $cleanTitle"
+            )
+        }
+    }
+
+    fun removeFromWatchLater(movieId: String) {
+        historyRepo.removeFromWatchLater(movieId)
+        if (_uiState.value.selectedCinemaCategory == "📌 Смотреть позже") {
+            _uiState.value = _uiState.value.copy(cinemaMovies = historyRepo.getWatchLater())
+        }
+    }
+
+    fun removeMovie(movie: MovieItem) {
+        vibrate(25)
+        when (_uiState.value.selectedCinemaCategory) {
+            "⭐ Закладки" -> {
+                historyRepo.removeFromFavorites(movie.id)
+                _uiState.value = _uiState.value.copy(
+                    cinemaMovies = historyRepo.getFavorites(),
+                    lastMessage = "Удалено из закладок: ${movie.title}"
+                )
+            }
+            "📌 Смотреть позже" -> {
+                historyRepo.removeFromWatchLater(movie.id)
+                _uiState.value = _uiState.value.copy(
+                    cinemaMovies = historyRepo.getWatchLater(),
+                    lastMessage = "Удалено из «Смотреть позже»: ${movie.title}"
+                )
+            }
+            else -> {
+                historyRepo.removeFromHistory(movie.id)
+                _uiState.value = _uiState.value.copy(
+                    cinemaMovies = historyRepo.getHistory(),
+                    lastMessage = "Удалено из истории: ${movie.title}"
+                )
+            }
+        }
+    }
+
+    fun removeYouTubeHistoryItem(id: String) {
+        vibrate(25)
+        youtubeHistoryRepo.removeFromHistory(id)
+        _uiState.value = _uiState.value.copy(
+            youtubeHistory = youtubeHistoryRepo.getHistory(),
+            lastMessage = "Запись удалена из списка"
+        )
+    }
+
+    fun switchAudioTrack() {
+        vibrate(30)
+        viewModelScope.launch {
+            // В Allwinner fireplayer / Android TV медиа-дорожка переключается KEYCODE_MEDIA_AUDIO_TRACK (222)
+            adbClient.execute("input keyevent 222")
+            _uiState.value = _uiState.value.copy(lastMessage = "Переключение аудиодорожки")
+        }
+    }
+
+    fun toggleSubtitles() {
+        vibrate(30)
+        viewModelScope.launch {
+            // KEYCODE_CAPTIONS = 175, для SmartTube клавиша 'C' = 31
+            adbClient.execute("input keyevent 175; input keyevent 31")
+            _uiState.value = _uiState.value.copy(lastMessage = "Переключение субтитров")
+        }
+    }
+
+    fun bookmarkCurrentMedia() {
+        vibrate(50)
+        viewModelScope.launch {
+            val active = _uiState.value.activeMoviePlaying
+            if (active != null) {
+                historyRepo.toggleFavorite(active)
+                _uiState.value = _uiState.value.copy(
+                    lastMessage = "⭐ Фильм сохранен в закладки: ${active.title}"
+                )
+                return@launch
+            }
+            // Если открыт SmartTube, посылаем горячую клавишу закладки 30 (B) и фиксируем в истории
+            adbClient.execute("input keyevent 30")
+            bookmarkCurrentYouTubeVideo()
+        }
     }
 
     private fun executeCommand(command: String) {

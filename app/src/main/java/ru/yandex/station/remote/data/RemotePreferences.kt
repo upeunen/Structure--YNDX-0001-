@@ -12,6 +12,7 @@ class RemotePreferences(context: Context) {
         private const val KEY_PORT = "station_port"
         private const val KEY_RUTRACKER_LOGIN = "rutracker_login"
         private const val KEY_RUTRACKER_PASS = "rutracker_pass"
+        private const val KEY_LAST_RUTRACKER_URL = "last_rutracker_url"
 
         const val DEFAULT_IP = "192.168.100.6"
         const val DEFAULT_PORT = 5555
@@ -32,4 +33,8 @@ class RemotePreferences(context: Context) {
     var rutrackerPassword: String
         get() = prefs.getString(KEY_RUTRACKER_PASS, "") ?: ""
         set(value) = prefs.edit().putString(KEY_RUTRACKER_PASS, value).apply()
+
+    var lastRutrackerUrl: String
+        get() = prefs.getString(KEY_LAST_RUTRACKER_URL, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_LAST_RUTRACKER_URL, value).apply()
 }

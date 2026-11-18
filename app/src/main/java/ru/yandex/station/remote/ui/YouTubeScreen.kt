@@ -38,6 +38,44 @@ fun YouTubeScreen(
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     var inputText by remember { mutableStateOf(uiState.youtubeUrlInput) }
+    var itemToDelete by remember { mutableStateOf<YouTubeItem?>(null) }
+
+    if (itemToDelete != null) {
+        val target = itemToDelete!!
+        AlertDialog(
+            onDismissRequest = { itemToDelete = null },
+            title = {
+                Text(
+                    text = "Удаление",
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+            },
+            text = {
+                Text(
+                    text = "Удалить «${target.title}» из истории?",
+                    color = TextSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.removeYouTubeHistoryItem(target.id)
+                        itemToDelete = null
+                    }
+                ) {
+                    Text("Удалить", color = AccentRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { itemToDelete = null }) {
+                    Text("Отмена", color = TextPrimary)
+                }
+            },
+            containerColor = DarkSurface,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
 
     Scaffold(
         containerColor = OledBlack,
@@ -456,7 +494,8 @@ fun YouTubeScreen(
                 items(uiState.youtubeHistory, key = { it.id + it.urlOrQuery }) { item ->
                     YouTubeHistoryCard(
                         item = item,
-                        onClick = { viewModel.launchYouTubeHistoryItem(item) }
+                        onClick = { viewModel.launchYouTubeHistoryItem(item) },
+                        onDelete = { itemToDelete = item }
                     )
                 }
             }
@@ -471,7 +510,8 @@ fun YouTubeScreen(
 @Composable
 fun YouTubeHistoryCard(
     item: YouTubeItem,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDelete: () -> Unit
 ) {
     val dateFormat = remember { SimpleDateFormat("dd.MM HH:mm", Locale.getDefault()) }
     val dateStr = remember(item.timestamp) { dateFormat.format(Date(item.timestamp)) }
@@ -531,12 +571,22 @@ fun YouTubeHistoryCard(
                 }
             }
 
-            IconButton(onClick = onClick) {
-                Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = "Запустить повторно",
-                    tint = AccentYandex
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onClick) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Запустить повторно",
+                        tint = AccentYandex
+                    )
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        imageVector = Icons.Default.DeleteOutline,
+                        contentDescription = "Удалить",
+                        tint = TextSecondary.copy(alpha = 0.7f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
     }

@@ -44,6 +44,49 @@ fun CinemaScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    var movieToDelete by remember { mutableStateOf<MovieItem?>(null) }
+
+    if (movieToDelete != null) {
+        val target = movieToDelete!!
+        val listName = when (uiState.selectedCinemaCategory) {
+            "⭐ Закладки" -> "закладок"
+            "📌 Смотреть позже" -> "«Смотреть позже»"
+            else -> "истории"
+        }
+        AlertDialog(
+            onDismissRequest = { movieToDelete = null },
+            title = {
+                Text(
+                    text = "Удаление",
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+            },
+            text = {
+                Text(
+                    text = "Удалить «${target.title}» из $listName?",
+                    color = TextSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.removeMovie(target)
+                        movieToDelete = null
+                    }
+                ) {
+                    Text("Удалить", color = AccentRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { movieToDelete = null }) {
+                    Text("Отмена", color = TextPrimary)
+                }
+            },
+            containerColor = DarkSurface,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
 
     // Лаунчер для выбора .torrent файла на смартфоне через OpenDocument (SAF)
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -277,9 +320,9 @@ fun CinemaScreen(
                 }
             }
 
-            // Горизонтальные категории: История и Закладки
+            // Горизонтальные категории: История, Закладки, Сборки, Смотреть позже
             item {
-                val categories = listOf("🕒 История", "⭐ Закладки")
+                val categories = listOf("🕒 История", "⭐ Закладки", "🎬 Сборки", "📌 Смотреть позже")
                 val scrollState = rememberScrollState()
 
                 Row(
@@ -291,7 +334,13 @@ fun CinemaScreen(
                     categories.forEach { cat ->
                         val isSelected = uiState.selectedCinemaCategory == cat
                         Surface(
-                            onClick = { viewModel.selectCinemaCategory(cat) },
+                            onClick = {
+                                if (cat == "🎬 Сборки") {
+                                    onOpenCollections()
+                                } else {
+                                    viewModel.selectCinemaCategory(cat)
+                                }
+                            },
                             shape = RoundedCornerShape(20.dp),
                             color = if (isSelected) AccentYandex else DarkSurface,
                             border = if (!isSelected) androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceElevated) else null,
@@ -479,7 +528,8 @@ fun CinemaScreen(
                         movie = movie,
                         isFavorite = viewModel.isFavoriteMovie(movie.id),
                         onPlay = { viewModel.playMovieOnStation(movie) },
-                        onToggleFavorite = { viewModel.toggleFavoriteMovie(movie) }
+                        onToggleFavorite = { viewModel.toggleFavoriteMovie(movie) },
+                        onDelete = { movieToDelete = movie }
                     )
                 }
             }
@@ -760,7 +810,8 @@ fun MovieCard(
     movie: MovieItem,
     isFavorite: Boolean,
     onPlay: () -> Unit,
-    onToggleFavorite: () -> Unit
+    onToggleFavorite: () -> Unit,
+    onDelete: () -> Unit
 ) {
     Card(
         colors = CardDefaults.cardColors(containerColor = DarkSurface),
@@ -792,15 +843,31 @@ fun MovieCard(
                     }
                 }
 
-                IconButton(
-                    onClick = onToggleFavorite,
-                    modifier = Modifier.size(32.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    Icon(
-                        imageVector = if (isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
-                        contentDescription = "В закладки",
-                        tint = if (isFavorite) AccentYandex else TextSecondary
-                    )
+                    IconButton(
+                        onClick = onToggleFavorite,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
+                            contentDescription = "В закладки",
+                            tint = if (isFavorite) AccentYandex else TextSecondary
+                        )
+                    }
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteOutline,
+                            contentDescription = "Удалить",
+                            tint = TextSecondary.copy(alpha = 0.7f),
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
                 }
             }
 

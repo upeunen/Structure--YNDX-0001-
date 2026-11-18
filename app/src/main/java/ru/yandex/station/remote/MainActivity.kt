@@ -225,8 +225,10 @@ class MainActivity : ComponentActivity() {
                                 currentIp = uiState.ip,
                                 currentPort = uiState.port,
                                 connectionStatus = uiState.connectionStatus,
+                                debugLogs = uiState.debugLogs,
                                 onTestConnection = { viewModel.checkConnection() },
                                 onCleanMemory = { viewModel.cleanStationMemory() },
+                                onClearLogs = { viewModel.clearLogs() },
                                 onSave = { newIp, newPort ->
                                     viewModel.saveSettings(newIp, newPort)
                                 },

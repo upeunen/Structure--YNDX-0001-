@@ -8,6 +8,14 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.charset.StandardCharsets
 
+data class ConnectionTestResult(
+    val isSuccess: Boolean,
+    val durationMs: Long,
+    val tcpConnectMs: Long = 0L,
+    val handshakeMs: Long = 0L,
+    val errorMessage: String? = null
+)
+
 class AdbClient(
     val host: String,
     val port: Int = 5555,
@@ -153,16 +161,22 @@ class AdbClient(
         }
     }
 
-    suspend fun testConnection(): Boolean = withContext(Dispatchers.IO) {
+    suspend fun testConnectionDetailed(): ConnectionTestResult = withContext(Dispatchers.IO) {
+        val startTotal = System.currentTimeMillis()
+        var tcpConnectMs = 0L
         try {
             kotlinx.coroutines.withTimeout(2500L) {
                 Socket().use { socket ->
                     socket.tcpNoDelay = true
                     socket.soTimeout = 2000
+                    val startTcp = System.currentTimeMillis()
                     socket.connect(InetSocketAddress(host, port), 2000)
+                    tcpConnectMs = System.currentTimeMillis() - startTcp
+
                     val out = socket.getOutputStream()
                     val input = socket.getInputStream()
 
+                    val startHandshake = System.currentTimeMillis()
                     val cnxnData = "host::\u0000".toByteArray(StandardCharsets.UTF_8)
                     val cnxnMsg = AdbProtocol.Message(
                         command = AdbProtocol.A_CNXN,
@@ -172,11 +186,42 @@ class AdbClient(
                     )
                     cnxnMsg.write(out)
                     val response = AdbProtocol.Message.read(input)
-                    response.command == AdbProtocol.A_CNXN
+                    val handshakeMs = System.currentTimeMillis() - startHandshake
+
+                    if (response.command == AdbProtocol.A_CNXN) {
+                        ConnectionTestResult(
+                            isSuccess = true,
+                            durationMs = System.currentTimeMillis() - startTotal,
+                            tcpConnectMs = tcpConnectMs,
+                            handshakeMs = handshakeMs
+                        )
+                    } else {
+                        ConnectionTestResult(
+                            isSuccess = false,
+                            durationMs = System.currentTimeMillis() - startTotal,
+                            tcpConnectMs = tcpConnectMs,
+                            handshakeMs = handshakeMs,
+                            errorMessage = "Отклонено устройством (код ${response.command})"
+                        )
+                    }
                 }
             }
-        } catch (_: Exception) {
-            false
+        } catch (e: Exception) {
+            val err = when (e) {
+                is java.net.SocketTimeoutException -> "Таймаут сокета Станции (>2 сек)"
+                is java.net.ConnectException -> "Порт $port отклонил подключение (${e.message ?: "нет ответа"})"
+                is java.net.NoRouteToHostException -> "Нет маршрута к $host (телефон не в домашней Wi-Fi сети)"
+                is kotlinx.coroutines.TimeoutCancellationException -> "Превышен общий лимит ожидания (2.5 сек)"
+                else -> "${e.javaClass.simpleName}: ${e.message ?: "ошибка сети"}"
+            }
+            ConnectionTestResult(
+                isSuccess = false,
+                durationMs = System.currentTimeMillis() - startTotal,
+                tcpConnectMs = tcpConnectMs,
+                errorMessage = err
+            )
         }
     }
+
+    suspend fun testConnection(): Boolean = testConnectionDetailed().isSuccess
 }

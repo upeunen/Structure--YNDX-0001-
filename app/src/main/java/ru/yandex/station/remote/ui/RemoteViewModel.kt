@@ -171,14 +171,16 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             adbClient.openSession()
             // Мгновенная проверка при включении экрана
             refreshStationState()
-            // Мягкая повторная проверка через 1.2 сек, когда Wi-Fi окончательно проснулся
-            delay(1200)
-            if (_uiState.value.connectionStatus != StationConnectionStatus.CONNECTED) {
-                refreshStationState()
-            }
-            // Цикл опроса только пока приложение на переднем плане
+            // Цикл опроса только пока приложение на переднем плане:
+            // Если связи нет (или Wi-Fi телефона только просыпается) — быстрый опрос каждые 1.5 сек.
+            // При стабильном подключении — спокойный интервал (4 сек для пульта, 8 сек для витрины).
             while (isAppInForeground) {
-                val delayMs = if (_uiState.value.isRemoteModalOpen) 4000L else 12000L
+                val isConnected = _uiState.value.connectionStatus == StationConnectionStatus.CONNECTED
+                val delayMs = when {
+                    !isConnected -> 1500L
+                    _uiState.value.isRemoteModalOpen -> 4000L
+                    else -> 8000L
+                }
                 delay(delayMs)
                 if (isAppInForeground) {
                     refreshStationState()
@@ -194,22 +196,32 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         adbClient.closeSession()
     }
 
-    private suspend fun refreshStationState() {
-        // Если пользователь недавно нажимал кнопки (меньше 4 сек), не нагружаем Станцию опросом
-        if (System.currentTimeMillis() - lastUserActionTime < 4000L) {
+    private suspend fun refreshStationState(isManualCheck: Boolean = false) {
+        // Если пользователь недавно нажимал кнопки (меньше 3 сек) и это не ручная проверка, не перегружаем Станцию
+        if (!isManualCheck && System.currentTimeMillis() - lastUserActionTime < 3000L) {
             return
         }
-        var isOk = adbClient.testConnection()
-        if (!isOk) {
-            delay(600)
-            isOk = adbClient.testConnection()
+
+        val prevStatus = _uiState.value.connectionStatus
+        var res = adbClient.testConnectionDetailed()
+        if (!res.isSuccess) {
+            delay(400)
+            res = adbClient.testConnectionDetailed()
         }
-        if (!isOk) {
+
+        if (!res.isSuccess) {
             stopPlaybackMonitor()
             _uiState.value = _uiState.value.copy(
                 connectionStatus = StationConnectionStatus.UNAVAILABLE
             )
+            if (isManualCheck || prevStatus != StationConnectionStatus.UNAVAILABLE) {
+                addLog("Связь FAIL (${res.durationMs}мс): ${res.errorMessage ?: "Нет ответа"}")
+            }
             return
+        }
+
+        if (isManualCheck || prevStatus != StationConnectionStatus.CONNECTED) {
+            addLog("Связь OK: пинг ${res.tcpConnectMs}мс, ответ ADB ${res.handshakeMs}мс (всего ${res.durationMs}мс)")
         }
 
         // Синхронизация реального времени воспроизведения с ТВ (SmartTube или VLC)
@@ -392,7 +404,8 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     fun checkConnection() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(connectionStatus = StationConnectionStatus.CHECKING)
-            refreshStationState()
+            addLog("Проверка связи со Станцией (${_uiState.value.ip}:${_uiState.value.port})...")
+            refreshStationState(isManualCheck = true)
         }
     }
 

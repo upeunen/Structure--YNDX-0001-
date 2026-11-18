@@ -1,46 +1,71 @@
 package ru.yandex.station.remote.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 
 @Composable
 fun SettingsDialog(
     currentIp: String,
     currentPort: Int,
     connectionStatus: StationConnectionStatus,
+    debugLogs: List<String> = emptyList(),
     onTestConnection: () -> Unit,
     onCleanMemory: (() -> Unit)? = null,
+    onClearLogs: (() -> Unit)? = null,
     onSave: (ip: String, port: Int) -> Unit,
     onDismiss: () -> Unit
 ) {
     var ipText by remember { mutableStateOf(currentIp) }
     var portText by remember { mutableStateOf(currentPort.toString()) }
+    val context = LocalContext.current
+    val scrollState = rememberScrollState()
+    val logScrollState = rememberScrollState()
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Surface(
             shape = RoundedCornerShape(20.dp),
             color = DarkSurface,
             tonalElevation = 8.dp,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .padding(vertical = 16.dp)
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                modifier = Modifier
+                    .padding(20.dp)
+                    .verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Text(
                     text = "Настройки подключения",
@@ -143,8 +168,92 @@ fun SettingsDialog(
                     }
                 }
 
+                // Секция подробных логов сети и подключения
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Журнал связи (Логи):",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextSecondary
+                        )
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            if (debugLogs.isNotEmpty()) {
+                                IconButton(
+                                    onClick = {
+                                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                        cm?.setPrimaryClip(ClipData.newPlainText("Logs", debugLogs.joinToString("\n")))
+                                        Toast.makeText(context, "Логи скопированы", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = "Скопировать",
+                                        tint = AccentYandex,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+                            }
+                            if (onClearLogs != null && debugLogs.isNotEmpty()) {
+                                IconButton(
+                                    onClick = onClearLogs,
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DeleteSweep,
+                                        contentDescription = "Очистить",
+                                        tint = TextSecondary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 60.dp, max = 150.dp)
+                            .background(OledBlack, RoundedCornerShape(8.dp))
+                            .border(1.dp, DarkSurfaceElevated, RoundedCornerShape(8.dp))
+                            .padding(8.dp)
+                            .verticalScroll(logScrollState)
+                    ) {
+                        if (debugLogs.isEmpty()) {
+                            Text(
+                                text = "Журнал пока пуст.\nНажмите «Проверить» для диагностики.",
+                                fontSize = 11.sp,
+                                color = TextSecondary,
+                                lineHeight = 15.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        } else {
+                            Text(
+                                text = debugLogs.joinToString("\n"),
+                                fontSize = 11.sp,
+                                color = TextPrimary,
+                                lineHeight = 15.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
+
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
                     horizontalArrangement = Arrangement.End
                 ) {
                     TextButton(

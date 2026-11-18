@@ -155,22 +155,25 @@ class AdbClient(
 
     suspend fun testConnection(): Boolean = withContext(Dispatchers.IO) {
         try {
-            Socket().use { socket ->
-                socket.soTimeout = 2000
-                socket.connect(InetSocketAddress(host, port), 2000)
-                val out = socket.getOutputStream()
-                val input = socket.getInputStream()
+            kotlinx.coroutines.withTimeout(2500L) {
+                Socket().use { socket ->
+                    socket.tcpNoDelay = true
+                    socket.soTimeout = 2000
+                    socket.connect(InetSocketAddress(host, port), 2000)
+                    val out = socket.getOutputStream()
+                    val input = socket.getInputStream()
 
-                val cnxnData = "host::\u0000".toByteArray(StandardCharsets.UTF_8)
-                val cnxnMsg = AdbProtocol.Message(
-                    command = AdbProtocol.A_CNXN,
-                    arg0 = AdbProtocol.A_VERSION,
-                    arg1 = AdbProtocol.MAX_PAYLOAD,
-                    data = cnxnData
-                )
-                cnxnMsg.write(out)
-                val response = AdbProtocol.Message.read(input)
-                response.command == AdbProtocol.A_CNXN
+                    val cnxnData = "host::\u0000".toByteArray(StandardCharsets.UTF_8)
+                    val cnxnMsg = AdbProtocol.Message(
+                        command = AdbProtocol.A_CNXN,
+                        arg0 = AdbProtocol.A_VERSION,
+                        arg1 = AdbProtocol.MAX_PAYLOAD,
+                        data = cnxnData
+                    )
+                    cnxnMsg.write(out)
+                    val response = AdbProtocol.Message.read(input)
+                    response.command == AdbProtocol.A_CNXN
+                }
             }
         } catch (_: Exception) {
             false

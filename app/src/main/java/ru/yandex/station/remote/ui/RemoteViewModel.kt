@@ -124,6 +124,9 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     private var activePositionSec: Long = 0L
     private var isPlaybackPaused: Boolean = false
     private var playbackMonitorJob: kotlinx.coroutines.Job? = null
+    private var heartbeatJob: kotlinx.coroutines.Job? = null
+    @Volatile
+    private var isAppInForeground: Boolean = true
     private var youtubeAutoHideJob: kotlinx.coroutines.Job? = null
     private var playerMissCount = 0
     private var seekJob: kotlinx.coroutines.Job? = null
@@ -131,7 +134,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         checkConnection()
-        startConnectionHeartbeat()
+        resumeSession()
         startCommandQueueProcessor()
         viewModelScope.launch {
             ensureTorrServerRunning(notifyIfStarted = false)
@@ -162,30 +165,33 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun resumeSession() {
-        viewModelScope.launch {
+        isAppInForeground = true
+        heartbeatJob?.cancel()
+        heartbeatJob = viewModelScope.launch {
             adbClient.openSession()
-            // Мгновенная проверка связи при включении экрана
+            // Мгновенная проверка при включении экрана
             refreshStationState()
-            // Мягкая повторная проверка через 1.5 сек, когда Wi-Fi окончательно проснулся
-            delay(1500)
+            // Мягкая повторная проверка через 1.2 сек, когда Wi-Fi окончательно проснулся
+            delay(1200)
             if (_uiState.value.connectionStatus != StationConnectionStatus.CONNECTED) {
                 refreshStationState()
+            }
+            // Цикл опроса только пока приложение на переднем плане
+            while (isAppInForeground) {
+                val delayMs = if (_uiState.value.isRemoteModalOpen) 4000L else 12000L
+                delay(delayMs)
+                if (isAppInForeground) {
+                    refreshStationState()
+                }
             }
         }
     }
 
     fun pauseSession() {
+        isAppInForeground = false
+        heartbeatJob?.cancel()
+        heartbeatJob = null
         adbClient.closeSession()
-    }
-
-    private fun startConnectionHeartbeat() {
-        viewModelScope.launch {
-            while (true) {
-                val delayMs = if (_uiState.value.isRemoteModalOpen) 4000L else 20000L
-                delay(delayMs)
-                refreshStationState()
-            }
-        }
     }
 
     private suspend fun refreshStationState() {

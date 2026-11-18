@@ -196,7 +196,7 @@ fun RemoteScreen(
 
             // Плеер воспроизведения ТВ (Play, Pause, Плавная перемотка, Громкость, Меню, Дорожка, Субтитры)
             MediaPlaybackCard(
-                mediaTitle = uiState.activeMoviePlaying?.title,
+                mediaTitle = uiState.activeMoviePlaying?.title ?: uiState.torrServerLiveStats?.title,
                 hasSeries = uiState.hasSeries,
                 currentEpisodeTitle = uiState.currentEpisodeTitle,
                 hasNextEpisode = uiState.hasNextEpisode,
@@ -221,7 +221,8 @@ fun RemoteScreen(
                 onNextAudioTrack = { viewModel.nextAudioTrack() },
                 onPrevAudioTrack = { viewModel.previousAudioTrack() },
                 onSubtitles = { viewModel.toggleSubtitles() },
-                onBookmark = { viewModel.bookmarkCurrentMedia() }
+                onBookmark = { viewModel.bookmarkCurrentMedia() },
+                onStop = { viewModel.stopCinemaAndReturnAlice(cleanMemory = true) }
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -256,7 +257,8 @@ fun MediaPlaybackCard(
     onNextAudioTrack: () -> Unit,
     onPrevAudioTrack: () -> Unit,
     onSubtitles: () -> Unit,
-    onBookmark: () -> Unit
+    onBookmark: () -> Unit,
+    onStop: (() -> Unit)? = null
 ) {
     val mins = playbackSec / 60
     val secs = playbackSec % 60
@@ -300,6 +302,19 @@ fun MediaPlaybackCard(
                                 maxLines = 1,
                                 modifier = Modifier.weight(1f)
                             )
+                            if (onStop != null) {
+                                IconButton(
+                                    onClick = onStop,
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Остановить и очистить память",
+                                        tint = AccentRed,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
                         }
 
                         if (hasSeries && onPreviousEpisode != null && onNextEpisode != null) {

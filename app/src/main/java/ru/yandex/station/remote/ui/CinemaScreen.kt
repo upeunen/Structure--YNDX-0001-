@@ -524,58 +524,49 @@ fun CinemaScreen(
                 }
             }
 
-            // Компактная панель плеера во время воспроизведения
-            uiState.activeMoviePlaying?.let { active ->
+            // Тонкая компактная полоска плеера в одну строку во время воспроизведения
+            val activeCinemaTitle = uiState.activeMoviePlaying?.title ?: uiState.torrServerLiveStats?.title
+            if (activeCinemaTitle != null) {
                 Surface(
                     color = Color(0xF018181A),
-                    shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+                    shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, AccentYandex.copy(alpha = 0.4f)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .align(Alignment.BottomCenter)
+                        .clickable { viewModel.openRemoteModal() }
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = active.title,
-                                color = TextPrimary,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
-                            )
-                            Text(
-                                text = if (uiState.isPlaying) "▶ Воспроизводится в VLC" else "⏸ Пауза",
-                                color = if (uiState.isPlaying) StatusGreen else AccentYandex,
-                                fontSize = 11.sp
-                            )
-                        }
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        Icon(
+                            imageVector = Icons.Default.Movie,
+                            contentDescription = null,
+                            tint = AccentYandex,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = activeCinemaTitle,
+                            color = TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = { viewModel.stopCinemaAndReturnAlice(cleanMemory = true) },
+                            modifier = Modifier.size(32.dp)
                         ) {
-                            IconButton(onClick = { viewModel.seekRelativeSeconds(-30L) }) {
-                                Icon(Icons.Default.Replay, contentDescription = "-30 сек", tint = TextPrimary)
-                            }
-                            IconButton(onClick = { viewModel.mediaPlayPause() }) {
-                                Icon(
-                                    imageVector = if (uiState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                    contentDescription = "Плей/Пауза",
-                                    tint = AccentYandex
-                                )
-                            }
-                            IconButton(onClick = { viewModel.seekRelativeSeconds(30L) }) {
-                                Icon(Icons.Default.Forward30, contentDescription = "+30 сек", tint = TextPrimary)
-                            }
-                            IconButton(onClick = { viewModel.stopCinemaAndReturnAlice(cleanMemory = true) }) {
-                                Icon(Icons.Default.Stop, contentDescription = "Стоп", tint = AccentRed)
-                            }
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Закрыть и очистить память",
+                                tint = AccentRed,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
                 }

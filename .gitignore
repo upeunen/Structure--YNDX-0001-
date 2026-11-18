@@ -9,5 +9,10 @@
 .externalNativeBuild
 .cxx
 
+# Служебные скрипты и кэши
+*.ps1
+StationMediaTool.java
+.kotlin/
+
 # Сохраняем готовый скомпилированный APK в корне для скачивания
 !app-release.apk

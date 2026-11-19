@@ -19,14 +19,20 @@ object RuTrackerScraper {
     const val DEFAULT_BASE_URL = "https://rutracker.org/forum"
 
     val CATEGORIES = listOf(
-        RuTrackerCategory("rutracker_arthouse", "🎨 Авторское и редкое кино", 124),
-        RuTrackerCategory("rutracker_hot_movies", "🔥 Новинки кино", 7),
-        RuTrackerCategory("rutracker_uhd_4k", "📽️ Фильмы в 4K UHD", 930),
-        RuTrackerCategory("rutracker_classics", "🏆 Классика мирового кино", 22),
+        RuTrackerCategory("rutracker_hot_movies", "🔥 Новинки зарубежного кино", 7),
+        RuTrackerCategory("rutracker_russian_movies", "🇷🇺 Наше современное кино", 22),
+        RuTrackerCategory("rutracker_soviet_movies", "📽️ Советское кино (СССР)", 941),
+        RuTrackerCategory("rutracker_uhd_4k", "✨ Фильмы в 4K UHD", 930),
+        RuTrackerCategory("rutracker_classics", "🏆 Зарубежная классика HD", 2198),
+        RuTrackerCategory("rutracker_arthouse", "🎨 Авторское и артхаус", 124),
         RuTrackerCategory("rutracker_series", "🍿 Зарубежные сериалы", 189),
         RuTrackerCategory("rutracker_ru_series", "📺 Русские сериалы", 2100),
+        RuTrackerCategory("rutracker_dorama", "🎎 Дорамы и азиатские сериалы", 915),
         RuTrackerCategory("rutracker_cartoons", "🧸 Мультфильмы", 208),
-        RuTrackerCategory("rutracker_doc", "📚 Документальное кино", 1460)
+        RuTrackerCategory("rutracker_animation_series", "🚀 Мультсериалы", 1464),
+        RuTrackerCategory("rutracker_anime", "⛩️ Аниме", 1105),
+        RuTrackerCategory("rutracker_doc", "📚 Документальное кино", 1460),
+        RuTrackerCategory("rutracker_concerts", "🎸 Музыкальные концерты", 314)
     )
 
     private val STOP_WORDS = listOf(
@@ -155,10 +161,21 @@ object RuTrackerScraper {
             allMovies.addAll(forumMovies)
         }
 
-        // Обогащаем первые 20 раздач полными деталями (постеры, синопсис, реальный рейтинг КП/IMDb)
+        // 1. Обогащаем первые 20 раздач полными деталями из RuTracker (постеры, синопсис, реальный рейтинг КП/IMDb)
+        // 2. Для раздач с 21 по 100 сразу находим постеры из локальной базы и кинобазы
         val enriched = allMovies.mapIndexed { idx, item ->
             if (idx < 20 && (item.posterUrl.isBlank() || item.rating == 0.0)) {
                 enrichTopicDetails(cleanBase, cookies, userAgent, item)
+            } else if (item.posterUrl.isBlank()) {
+                val local = MovieCatalogService.findPoster(item.title, item.originalTitle)
+                if (local.isNotBlank()) {
+                    item.copy(posterUrl = local)
+                } else if (idx < 45) {
+                    val online = MovieCatalogService.fetchOnlinePoster(item.title, item.originalTitle, item.releaseYear)
+                    if (online.isNotBlank()) item.copy(posterUrl = online) else item
+                } else {
+                    item
+                }
             } else {
                 item
             }
@@ -166,7 +183,7 @@ object RuTrackerScraper {
         enriched
     }
 
-    private suspend fun enrichTopicDetails(
+    suspend fun enrichTopicDetails(
         baseUrl: String,
         cookies: String,
         userAgent: String,

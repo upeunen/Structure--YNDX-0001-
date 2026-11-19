@@ -102,10 +102,18 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             rutrackerPass = prefs.rutrackerPassword,
             youtubeHistory = youtubeHistoryRepo.getHistory(),
             cinemaMovies = historyRepo.getHistory(),
-            enabledShowcaseCategories = prefs.enabledRuTrackerCategories
+            enabledShowcaseCategories = if (prefs.enabledRuTrackerCategories.size <= 8) {
+                val full = RuTrackerScraper.CATEGORIES.map { it.id }.toSet()
+                prefs.enabledRuTrackerCategories = full
+                full
+            } else {
+                prefs.enabledRuTrackerCategories
+            }
         )
     )
     val uiState: StateFlow<RemoteUiState> = _uiState.asStateFlow()
+
+    private var showcaseEnrichmentJob: kotlinx.coroutines.Job? = null
 
     private var adbClient = AdbClient(_uiState.value.ip, _uiState.value.port)
     private var torrServerClient = TorrServerClient(_uiState.value.ip, _uiState.value.torrServerPort)
@@ -1782,20 +1790,9 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
                 if (totalNew > 0) {
                     addLog("RuTracker: витрина успешно обновлена ($totalNew раздач)")
-                    // Обновляем витрину новыми данными
-                    val updatedCustom = mutableListOf<MovieSection>()
-                    val ruSaved = showcaseRepo.getRuTrackerMovies()
-                    if (ruSaved.isNotEmpty()) {
-                        updatedCustom.add(MovieSection("rutracker_saved", "💎 Находки из RuTracker", ruSaved))
-                    }
-                    for (cat in RuTrackerScraper.CATEGORIES) {
-                        if (!enabled.contains(cat.id)) continue
-                        val catMovies = showcaseRepo.getCategoryMovies(cat.id)
-                        if (catMovies.isNotEmpty()) {
-                            updatedCustom.add(MovieSection(cat.id, cat.title, catMovies))
-                        }
-                    }
-                    _uiState.value = _uiState.value.copy(movieSections = updatedCustom)
+                    refreshShowcaseSectionsUi(enabled)
+                    // Запускаем фоновую плавную докачку остальных обложек и рейтингов с 20 по 100
+                    startBackgroundShowcaseEnricher(baseUrl, cookies, ua)
                 }
             } catch (e: RuTrackerCaptchaException) {
                 addLog("RuTracker: требуется подтверждение/капча. Фоновый сбор приостановлен.")
@@ -1805,6 +1802,71 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
         }
+    }
+
+    private fun startBackgroundShowcaseEnricher(baseUrl: String, cookies: String, ua: String) {
+        showcaseEnrichmentJob?.cancel()
+        val cleanBase = RuTrackerScraper.getCleanBaseUrl(baseUrl)
+
+        showcaseEnrichmentJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val enabled = _uiState.value.enabledShowcaseCategories.ifEmpty { prefs.enabledRuTrackerCategories }
+
+            for (cat in RuTrackerScraper.CATEGORIES) {
+                if (!enabled.contains(cat.id)) continue
+                val movies = showcaseRepo.getCategoryMovies(cat.id).toMutableList()
+                if (movies.isEmpty()) continue
+
+                var changedInCat = false
+
+                // Плавно обходим раздачи с 20 по 99, загружая постеры и оценки КП/IMDb
+                for (i in 20 until movies.size) {
+                    if (!isActive) return@launch
+                    val item = movies[i]
+
+                    if (item.posterUrl.isBlank() || item.rating == 0.0) {
+                        try {
+                            delay(900) // Бережная пауза, чтобы RuTracker не запрашивал капчу
+                            val enriched = RuTrackerScraper.enrichTopicDetails(cleanBase, cookies, ua, item)
+                            if (enriched.posterUrl != item.posterUrl || enriched.rating != item.rating || enriched.overview != item.overview) {
+                                movies[i] = enriched
+                                changedInCat = true
+                            }
+                        } catch (e: RuTrackerCaptchaException) {
+                            addLog("RuTracker: фоновая догрузка прервана (требуется капча)")
+                            _uiState.value = _uiState.value.copy(isRuTrackerCaptchaWaiting = true)
+                            return@launch
+                        } catch (_: Exception) {}
+                    }
+
+                    // Каждые 4 обновленные карточки сохраняем и мгновенно показываем пользователю
+                    if (changedInCat && (i % 4 == 0 || i == movies.size - 1)) {
+                        showcaseRepo.saveCategoryMovies(cat.id, movies)
+                        refreshShowcaseSectionsUi(enabled)
+                    }
+                }
+
+                if (changedInCat) {
+                    showcaseRepo.saveCategoryMovies(cat.id, movies)
+                    refreshShowcaseSectionsUi(enabled)
+                }
+            }
+        }
+    }
+
+    private fun refreshShowcaseSectionsUi(enabled: Set<String>) {
+        val updatedCustom = mutableListOf<MovieSection>()
+        val ruSaved = showcaseRepo.getRuTrackerMovies()
+        if (ruSaved.isNotEmpty()) {
+            updatedCustom.add(MovieSection("rutracker_saved", "💎 Находки из RuTracker", ruSaved))
+        }
+        for (cat in RuTrackerScraper.CATEGORIES) {
+            if (!enabled.contains(cat.id)) continue
+            val catMovies = showcaseRepo.getCategoryMovies(cat.id)
+            if (catMovies.isNotEmpty()) {
+                updatedCustom.add(MovieSection(cat.id, cat.title, catMovies))
+            }
+        }
+        _uiState.value = _uiState.value.copy(movieSections = updatedCustom)
     }
 
     fun playRuTrackerTopic(topicId: Long, title: String) {

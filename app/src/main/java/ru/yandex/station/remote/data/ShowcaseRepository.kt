@@ -10,11 +10,27 @@ class ShowcaseRepository(context: Context) {
         context.getSharedPreferences("yandex_station_showcase", Context.MODE_PRIVATE)
 
     companion object {
-        private const val KEY_RUTRACKER_MOVIES = "rutracker_showcase_movies"
+        const val KEY_RUTRACKER_SAVED = "rutracker_showcase_movies"
+        private const val PREFIX_CATEGORY = "showcase_cat_"
     }
 
     fun getRuTrackerMovies(): List<MovieCatalogItem> {
-        val jsonStr = prefs.getString(KEY_RUTRACKER_MOVIES, null) ?: return emptyList()
+        return getCategoryMovies(KEY_RUTRACKER_SAVED)
+    }
+
+    fun addRuTrackerMovie(movie: MovieCatalogItem) {
+        val current = getRuTrackerMovies().toMutableList()
+        current.removeAll { it.title.equals(movie.title, ignoreCase = true) || it.id == movie.id }
+        current.add(0, movie)
+        if (current.size > 80) {
+            current.removeAt(current.size - 1)
+        }
+        saveCategoryMovies(KEY_RUTRACKER_SAVED, current)
+    }
+
+    fun getCategoryMovies(categoryId: String): List<MovieCatalogItem> {
+        val key = if (categoryId == KEY_RUTRACKER_SAVED) KEY_RUTRACKER_SAVED else "$PREFIX_CATEGORY$categoryId"
+        val jsonStr = prefs.getString(key, null) ?: return emptyList()
         val list = mutableListOf<MovieCatalogItem>()
         try {
             val arr = JSONArray(jsonStr)
@@ -38,15 +54,10 @@ class ShowcaseRepository(context: Context) {
         return list
     }
 
-    fun addRuTrackerMovie(movie: MovieCatalogItem) {
-        val current = getRuTrackerMovies().toMutableList()
-        current.removeAll { it.title.equals(movie.title, ignoreCase = true) || it.id == movie.id }
-        current.add(0, movie)
-        if (current.size > 80) {
-            current.removeAt(current.size - 1)
-        }
+    fun saveCategoryMovies(categoryId: String, movies: List<MovieCatalogItem>) {
+        val key = if (categoryId == KEY_RUTRACKER_SAVED) KEY_RUTRACKER_SAVED else "$PREFIX_CATEGORY$categoryId"
         val arr = JSONArray()
-        for (m in current) {
+        for (m in movies.take(50)) {
             val obj = JSONObject().apply {
                 put("id", m.id)
                 put("title", m.title)
@@ -60,10 +71,10 @@ class ShowcaseRepository(context: Context) {
             }
             arr.put(obj)
         }
-        prefs.edit().putString(KEY_RUTRACKER_MOVIES, arr.toString()).apply()
+        prefs.edit().putString(key, arr.toString()).apply()
     }
 
     fun clearRuTrackerMovies() {
-        prefs.edit().remove(KEY_RUTRACKER_MOVIES).apply()
+        prefs.edit().remove(KEY_RUTRACKER_SAVED).apply()
     }
 }

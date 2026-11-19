@@ -1639,22 +1639,163 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
     // === Управление онлайн-витриной и раздачами ===
 
-    fun loadMovieCatalog() {
+    fun loadMovieCatalog(forceRefreshRuTracker: Boolean = false) {
         if (_uiState.value.isMovieCatalogLoading) return
         _uiState.value = _uiState.value.copy(isMovieCatalogLoading = true)
         viewModelScope.launch {
-            val baseSections = MovieCatalogService.loadMainSections()
-            val ruMovies = showcaseRepo.getRuTrackerMovies()
-            val allSections = if (ruMovies.isNotEmpty()) {
-                listOf(MovieSection("rutracker_saved", "💎 Находки из RuTracker", ruMovies)) + baseSections
-            } else {
-                baseSections
+            val customSections = mutableListOf<MovieSection>()
+
+            // 1. Личные находки пользователя из открытых тем
+            val ruSaved = showcaseRepo.getRuTrackerMovies()
+            if (ruSaved.isNotEmpty()) {
+                customSections.add(MovieSection("rutracker_saved", "💎 Находки из RuTracker", ruSaved))
             }
+
+            // 2. Распарсенные разделы RuTracker по сессии (Авторское кино, Новинки, Классика, Сериалы)
+            for (cat in RuTrackerScraper.CATEGORIES) {
+                val catMovies = showcaseRepo.getCategoryMovies(cat.id)
+                if (catMovies.isNotEmpty()) {
+                    customSections.add(MovieSection(cat.id, cat.title, catMovies))
+                }
+            }
+
+            // 3. Базовые проверенные подборки
+            val baseSections = MovieCatalogService.loadMainSections()
+            val allSections = customSections + baseSections
+
             _uiState.value = _uiState.value.copy(
                 movieSections = allSections,
                 isMovieCatalogLoading = false
             )
             addLog("Витрина: подборки обновлены (${allSections.size} категорий)")
+
+            // Фоновая синхронизация с RuTracker при наличии сессии
+            if (hasRuTrackerAuthCookies()) {
+                val now = System.currentTimeMillis()
+                if (forceRefreshRuTracker || (now - prefs.rutrackerLastSyncTimestamp > 15 * 60 * 1000L)) {
+                    syncRuTrackerCategoriesInBackground(force = forceRefreshRuTracker)
+                }
+            }
+        }
+    }
+
+    fun hasRuTrackerAuthCookies(cookies: String = prefs.rutrackerCookies): Boolean {
+        return cookies.contains("bb_data") || cookies.contains("bb_session") || cookies.contains("bb_ssl")
+    }
+
+    fun onRuTrackerPageVisited(url: String, cookies: String, userAgent: String) {
+        if (url.isBlank()) return
+        prefs.lastRutrackerUrl = url
+        if (cookies.isNotBlank()) {
+            prefs.rutrackerCookies = cookies
+        }
+        if (userAgent.isNotBlank()) {
+            prefs.rutrackerUserAgent = userAgent
+        }
+        val now = System.currentTimeMillis()
+        if (hasRuTrackerAuthCookies(cookies) && (now - prefs.rutrackerLastSyncTimestamp > 20 * 60 * 1000L)) {
+            syncRuTrackerCategoriesInBackground(force = false)
+        }
+    }
+
+    fun syncRuTrackerCategoriesInBackground(force: Boolean = false) {
+        val cookies = prefs.rutrackerCookies
+        if (cookies.isBlank()) return
+        val ua = prefs.rutrackerUserAgent
+        val baseUrl = prefs.lastRutrackerUrl.ifBlank { RuTrackerScraper.DEFAULT_BASE_URL }
+
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            addLog("RuTracker: фоновый сбор подборок по сессии...")
+            var totalNew = 0
+            for (cat in RuTrackerScraper.CATEGORIES) {
+                try {
+                    delay(1200) // Бережная пауза между запросами
+                    val items = RuTrackerScraper.fetchCategoryMovies(baseUrl, cookies, ua, cat, limit = 20)
+                    if (items.isNotEmpty()) {
+                        showcaseRepo.saveCategoryMovies(cat.id, items)
+                        totalNew += items.size
+                    }
+                } catch (e: Exception) {
+                    addLog("RuTracker: ошибка сбора ${cat.title}: ${e.message}")
+                }
+            }
+            prefs.rutrackerLastSyncTimestamp = System.currentTimeMillis()
+            if (totalNew > 0) {
+                addLog("RuTracker: витрина успешно обновлена ($totalNew раздач)")
+                // Обновляем витрину новыми данными
+                val updatedCustom = mutableListOf<MovieSection>()
+                val ruSaved = showcaseRepo.getRuTrackerMovies()
+                if (ruSaved.isNotEmpty()) {
+                    updatedCustom.add(MovieSection("rutracker_saved", "💎 Находки из RuTracker", ruSaved))
+                }
+                for (cat in RuTrackerScraper.CATEGORIES) {
+                    val catMovies = showcaseRepo.getCategoryMovies(cat.id)
+                    if (catMovies.isNotEmpty()) {
+                        updatedCustom.add(MovieSection(cat.id, cat.title, catMovies))
+                    }
+                }
+                val base = MovieCatalogService.loadMainSections()
+                _uiState.value = _uiState.value.copy(movieSections = updatedCustom + base)
+            }
+        }
+    }
+
+    fun playRuTrackerTopic(topicId: Long, title: String) {
+        val baseUrl = prefs.lastRutrackerUrl.ifBlank { RuTrackerScraper.DEFAULT_BASE_URL }
+        val cleanBase = RuTrackerScraper.getCleanBaseUrl(baseUrl)
+        val dlUrl = "$cleanBase/dl.php?t=$topicId"
+        val cookies = prefs.rutrackerCookies
+        val ua = prefs.rutrackerUserAgent
+
+        viewModelScope.launch {
+            showMessage("Загрузка раздачи «$title» с RuTracker...")
+            val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    var currentUrl = dlUrl
+                    var currentReferer = "$cleanBase/viewtopic.php?t=$topicId"
+                    var responseCode = 0
+                    var bytes = ByteArray(0)
+
+                    for (step in 0..5) {
+                        val conn = (java.net.URL(currentUrl).openConnection() as java.net.HttpURLConnection).apply {
+                            requestMethod = "GET"
+                            connectTimeout = 10000
+                            readTimeout = 15000
+                            instanceFollowRedirects = false
+                            if (cookies.isNotBlank()) setRequestProperty("Cookie", cookies)
+                            if (currentReferer.isNotBlank()) setRequestProperty("Referer", currentReferer)
+                            if (ua.isNotBlank()) setRequestProperty("User-Agent", ua)
+                        }
+                        responseCode = conn.responseCode
+                        if (responseCode in 300..399) {
+                            val location = conn.getHeaderField("Location")
+                            conn.disconnect()
+                            if (location.isNullOrBlank()) break
+                            currentReferer = currentUrl
+                            currentUrl = java.net.URL(java.net.URL(currentUrl), location).toString()
+                            continue
+                        }
+                        bytes = conn.inputStream.use { it.readBytes() }
+                        conn.disconnect()
+                        break
+                    }
+
+                    if (responseCode in 200..299 && bytes.isNotEmpty() && bytes.firstOrNull() == 'd'.code.toByte()) {
+                        Result.success(bytes)
+                    } else {
+                        Result.failure(Exception("Не удалось скачать торрент (код $responseCode)"))
+                    }
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+            }
+
+            result.onSuccess { bytes ->
+                val cleanName = title.take(50).ifBlank { "RuTracker_$topicId" }
+                uploadTorrentFileAndPlay(bytes, "$cleanName.torrent")
+            }.onFailure { err ->
+                showMessage("Ошибка: ${err.message}. Попробуйте открыть тему в браузере")
+            }
         }
     }
 
@@ -1667,20 +1808,17 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         category: String
     ) {
         if (rawTitle.isBlank()) return
-        val cleanTitle = rawTitle
-            .substringBefore(" [")
-            .substringBefore(" (")
-            .substringBefore(" /")
-            .trim()
-            .ifBlank { rawTitle.take(60) }
+        val parsed = RuTrackerScraper.parseRuTrackerTitle(rawTitle)
+        val cleanTitle = parsed.title.ifBlank { rawTitle.take(50) }
+        val poster = if (posterUrl.isNotBlank()) posterUrl else MovieCatalogService.findPoster(cleanTitle, parsed.originalTitle)
 
         val movie = MovieCatalogItem(
             id = topicId.toLongOrNull() ?: System.currentTimeMillis(),
             title = cleanTitle,
-            originalTitle = "",
-            overview = overview.trim().take(500),
-            posterUrl = posterUrl.trim(),
-            releaseYear = year.trim().ifBlank { "2024" },
+            originalTitle = parsed.originalTitle,
+            overview = if (overview.isNotBlank()) overview.trim().take(500) else parsed.overview,
+            posterUrl = poster,
+            releaseYear = if (year.isNotBlank()) year.trim() else parsed.year.ifBlank { "2024" },
             rating = 8.5,
             genre = category.ifBlank { "RuTracker" }
         )
@@ -1699,7 +1837,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             size = "",
             seeds = 10,
             category = if (asLater) "Смотреть позже" else "Закладки",
-            magnetUrl = "",
+            magnetUrl = if (movie.id > 1000L) "rutracker_topic_${movie.id}" else "",
             description = movie.overview,
             posterUrl = movie.posterUrl
         )
@@ -1742,7 +1880,19 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 movieTitle = movie.title,
                 originalTitle = movie.originalTitle,
                 year = movie.releaseYear
-            )
+            ).toMutableList()
+
+            // Если фильм получен из RuTracker и есть куки, добавляем прямую раздачу на первое место
+            if (movie.id > 1000L && hasRuTrackerAuthCookies()) {
+                val ruRelease = TorrentRelease(
+                    title = "⚡ Оригинальная раздача с RuTracker [${movie.genre}]",
+                    size = "RuTracker",
+                    seeds = 100,
+                    magnetUrl = "rutracker_topic_${movie.id}"
+                )
+                list.add(0, ruRelease)
+            }
+
             _uiState.value = _uiState.value.copy(
                 movieReleases = list,
                 isLoadingReleases = false,
@@ -1763,6 +1913,11 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     fun playRelease(release: TorrentRelease, movie: MovieCatalogItem) {
         vibrate(40)
         dismissMovieReleases()
+        if (release.magnetUrl.startsWith("rutracker_topic_")) {
+            val topicId = release.magnetUrl.removePrefix("rutracker_topic_").toLongOrNull() ?: movie.id
+            playRuTrackerTopic(topicId, movie.title)
+            return
+        }
         val movieItem = MovieItem(
             id = "movie_" + System.currentTimeMillis(),
             title = movie.title,

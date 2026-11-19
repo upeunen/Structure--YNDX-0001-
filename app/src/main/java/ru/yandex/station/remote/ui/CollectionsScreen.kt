@@ -291,9 +291,11 @@ fun CollectionsScreen(
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 isLoading = false
                                 CookieManager.getInstance().flush()
-                                url?.let {
-                                    if (it.startsWith("http", ignoreCase = true) && !it.contains("dl.php", ignoreCase = true)) {
-                                        viewModel.saveLastRutrackerUrl(it)
+                                url?.let { currentUrl ->
+                                    if (currentUrl.startsWith("http", ignoreCase = true) && !currentUrl.contains("dl.php", ignoreCase = true)) {
+                                        val cookies = CookieManager.getInstance().getCookie(currentUrl) ?: ""
+                                        val ua = view?.settings?.userAgentString ?: ""
+                                        viewModel.onRuTrackerPageVisited(currentUrl, cookies, ua)
                                     }
                                 }
                                 val js = """
@@ -382,6 +384,21 @@ fun CollectionsScreen(
                                                 var tid = tm ? tm[1] : '';
                                                 if (window.PultBridge && window.PultBridge.saveTopicToCatalog && tid && rawTitle) {
                                                     window.PultBridge.saveTopicToCatalog(tid, rawTitle, pUrl, descText, y, 'RuTracker');
+                                                }
+                                            } else if (window.location.href.indexOf('tracker.php') !== -1 || window.location.href.indexOf('viewforum.php') !== -1) {
+                                                // Сбор тем со страницы поиска / списка раздач форума
+                                                var topicLinks = document.querySelectorAll('a.tt-text, a[href*="viewtopic.php?t="]');
+                                                for (var j = 0; j < Math.min(topicLinks.length, 12); j++) {
+                                                    var tl = topicLinks[j];
+                                                    var href = tl.getAttribute('href') || '';
+                                                    var tm2 = href.match(/[?&]t=(\d+)/);
+                                                    if (tm2 && tl.textContent) {
+                                                        var tid2 = tm2[1];
+                                                        var title2 = tl.textContent.trim();
+                                                        if (window.PultBridge && window.PultBridge.saveTopicToCatalog && tid2 && title2) {
+                                                            window.PultBridge.saveTopicToCatalog(tid2, title2, '', '', '', 'RuTracker');
+                                                        }
+                                                    }
                                                 }
                                             }
                                         } catch (e) {}

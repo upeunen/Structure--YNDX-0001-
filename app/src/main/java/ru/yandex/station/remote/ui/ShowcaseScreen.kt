@@ -84,7 +84,7 @@ fun ShowcaseScreen(
                         )
                     }
                     IconButton(
-                        onClick = { viewModel.loadMovieCatalog() },
+                        onClick = { viewModel.loadMovieCatalog(forceRefreshRuTracker = true) },
                         enabled = !uiState.isMovieCatalogLoading
                     ) {
                         if (uiState.isMovieCatalogLoading) {

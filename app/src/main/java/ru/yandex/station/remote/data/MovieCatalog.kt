@@ -634,6 +634,18 @@ object MovieCatalogService {
         )
     }
 
+    fun findPoster(title: String, originalTitle: String = ""): String {
+        val t = title.trim().lowercase()
+        val orig = originalTitle.trim().lowercase()
+        val found = builtinMovies.firstOrNull {
+            it.title.lowercase() == t ||
+            (orig.isNotBlank() && it.originalTitle.lowercase() == orig) ||
+            (t.length >= 4 && it.title.lowercase().contains(t)) ||
+            (orig.length >= 4 && it.originalTitle.lowercase().contains(orig))
+        }
+        return found?.posterUrl ?: ""
+    }
+
     suspend fun loadMainSections(): List<MovieSection> = withContext(Dispatchers.IO) {
         // Мгновенный возврат проверенной базы с подтвержденными постерами
         loadBuiltinSections()

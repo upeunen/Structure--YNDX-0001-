@@ -376,15 +376,16 @@ fun CinemaScreen(
                             value = uiState.cinemaSearchQuery,
                             onValueChange = { viewModel.setCinemaSearchQuery(it) },
                             placeholder = {
-                                Text("Поиск в разделе «${uiState.selectedCinemaCategory}»...", color = TextSecondary, fontSize = 12.sp)
+                                Text("Поиск в разделе «${uiState.selectedCinemaCategory}»...", color = TextSecondary, fontSize = 13.sp)
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Default.Search, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
                             },
                             trailingIcon = {
                                 if (uiState.cinemaSearchQuery.isNotEmpty()) {
                                     IconButton(onClick = { viewModel.setCinemaSearchQuery("") }) {
                                         Icon(Icons.Default.Close, contentDescription = "Очистить", tint = TextSecondary, modifier = Modifier.size(18.dp))
                                     }
-                                } else {
-                                    Icon(Icons.Default.Search, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
                                 }
                             },
                             singleLine = true,
@@ -395,10 +396,8 @@ fun CinemaScreen(
                                 unfocusedTextColor = TextPrimary,
                                 cursorColor = AccentYandex
                             ),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
                 }

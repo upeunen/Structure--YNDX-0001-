@@ -116,8 +116,7 @@ fun ShowcaseScreen(
                 viewModel.playRuTrackerTopic(movie.id, movie.title)
             },
             onOpenTopicInBrowser = {
-                viewModel.dismissMovieReleases()
-                onOpenCollections()
+                viewModel.openRuTrackerTopicInBrowser(movie.id)
             }
         )
     }
@@ -1332,22 +1331,55 @@ fun ShowcaseDetailsSheet(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(modifier = Modifier.padding(10.dp)) {
+                                val (badgeText, badgeBg, badgeColor) = when {
+                                    release.title.contains("2160", ignoreCase = true) || release.title.contains("4k", ignoreCase = true) ->
+                                        Triple("✨ 4K UHD", Color(0xFF382305), Color(0xFFFFB300))
+                                    release.title.contains("1080", ignoreCase = true) ->
+                                        Triple("💎 1080p", Color(0xFF102A45), Color(0xFF64B5F6))
+                                    release.title.contains("720", ignoreCase = true) ->
+                                        Triple("🎬 720p HD", Color(0xFF14382C), Color(0xFF80CBC4))
+                                    release.title.contains("bdrip", ignoreCase = true) ->
+                                        Triple("💿 BDRip", Color(0xFF262626), TextPrimary)
+                                    release.title.contains("web-dl", ignoreCase = true) || release.title.contains("webrip", ignoreCase = true) ->
+                                        Triple("🌐 WEB-DL", Color(0xFF232533), Color(0xFFB0BEC5))
+                                    else -> Triple("", Color.Transparent, Color.Transparent)
+                                }
+
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Surface(
-                                        color = if (release.seeds > 0) Color(0xFF1E3A1E) else Color(0xFF2A2A2A),
-                                        shape = RoundedCornerShape(6.dp)
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        Text(
-                                            text = "⚡ ${release.seeds} сид.",
-                                            color = if (release.seeds > 0) Color(0xFF4CAF50) else TextSecondary,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
+                                        if (badgeText.isNotBlank()) {
+                                            Surface(
+                                                color = badgeBg,
+                                                shape = RoundedCornerShape(6.dp)
+                                            ) {
+                                                Text(
+                                                    text = badgeText,
+                                                    color = badgeColor,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                        Surface(
+                                            color = if (release.seeds > 0) Color(0xFF1E3A1E) else Color(0xFF2A2A2A),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "⚡ ${release.seeds} сид.",
+                                                color = if (release.seeds > 0) Color(0xFF4CAF50) else TextSecondary,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
                                     }
                                     if (release.size.isNotBlank()) {
                                         Surface(

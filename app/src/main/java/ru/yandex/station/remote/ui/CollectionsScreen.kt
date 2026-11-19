@@ -39,6 +39,7 @@ fun CollectionsScreen(
     viewModel: RemoteViewModel,
     onBack: () -> Unit
 ) {
+    val uiState by viewModel.uiState.collectAsState()
     val scope = rememberCoroutineScope()
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var isLoading by remember { mutableStateOf(true) }
@@ -53,6 +54,13 @@ fun CollectionsScreen(
             wv.goBack()
         } else {
             onBack()
+        }
+    }
+
+    LaunchedEffect(uiState.pendingBrowserUrl) {
+        val target = viewModel.consumePendingBrowserUrl()
+        if (!target.isNullOrBlank()) {
+            webViewRef?.loadUrl(target)
         }
     }
 
@@ -125,8 +133,6 @@ fun CollectionsScreen(
             }
         }
     }
-
-    val uiState by viewModel.uiState.collectAsState()
 
     // Диалог выбора загружаемых разделов RuTracker
     if (uiState.isShowcaseFilterOpen) {
@@ -468,7 +474,8 @@ fun CollectionsScreen(
                             }
                         }
 
-                        val startUrl = viewModel.getLastRutrackerUrl().ifEmpty { RUTRACKER_COLLECTIONS_URL }
+                        val pending = viewModel.consumePendingBrowserUrl()
+                        val startUrl = pending ?: viewModel.getLastRutrackerUrl().ifEmpty { RUTRACKER_COLLECTIONS_URL }
                         loadUrl(startUrl)
                         webViewRef = this
                     }

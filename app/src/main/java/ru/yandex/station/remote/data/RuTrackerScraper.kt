@@ -36,6 +36,7 @@ object RuTrackerScraper {
     )
 
     val CATALOG_CATEGORIES = listOf(
+        RuTrackerCategory("rutracker_movies_720p", "🎞️ Фильмы в HD (720p)", 2200),
         RuTrackerCategory("rutracker_theater", "🎭 Театр, спектакли и балет", 93),
         RuTrackerCategory("rutracker_humor", "😂 Юмор, Stand-Up и КВН", 393),
         RuTrackerCategory("rutracker_cartoons_ussr", "🐻 Мультфильмы СССР", 209),

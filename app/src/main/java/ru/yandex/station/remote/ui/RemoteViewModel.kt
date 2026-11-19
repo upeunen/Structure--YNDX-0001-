@@ -89,6 +89,7 @@ data class RemoteUiState(
     val customAddedCategories: Set<String> = emptySet(),
     val showcaseCategorySearchQuery: String = "",
     val isRuTrackerCaptchaWaiting: Boolean = false,
+    val pendingBrowserUrl: String? = null,
     val currentMovieReviews: List<MovieReview> = emptyList(),
     val isLoadingReviews: Boolean = false
 )
@@ -1614,6 +1615,24 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
     fun getLastRutrackerUrl(): String {
         return prefs.lastRutrackerUrl
+    }
+
+    fun openRuTrackerTopicInBrowser(topicId: Long) {
+        val cleanBase = RuTrackerScraper.getCleanBaseUrl(getLastRutrackerUrl())
+        val topicUrl = "$cleanBase/viewtopic.php?t=$topicId"
+        saveLastRutrackerUrl(topicUrl)
+        dismissMovieReleases()
+        _uiState.value = _uiState.value.copy(pendingBrowserUrl = topicUrl)
+        setAppScreen(AppScreen.COLLECTIONS)
+        addLog("RuTracker: открыта титульная страница темы $topicId")
+    }
+
+    fun consumePendingBrowserUrl(): String? {
+        val url = _uiState.value.pendingBrowserUrl
+        if (url != null) {
+            _uiState.value = _uiState.value.copy(pendingBrowserUrl = null)
+        }
+        return url
     }
 
     fun bookmarkFromBrowser(targetUrl: String, pageTitle: String) {

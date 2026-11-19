@@ -278,6 +278,22 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
+                        // Диалог выбора серий (для многофайловых раздач и сериалов)
+                        SeriesSelectionDialog(
+                            pending = uiState.pendingEpisodeSelection,
+                            onSelectFile = { viewModel.selectEpisodeAndPlay(it) },
+                            onDismiss = { viewModel.dismissEpisodeSelection() }
+                        )
+
+                        // Крупный счетчик буферизации и диалог продления ожидания
+                        BufferingDialog(
+                            status = uiState.bufferingStatus,
+                            onContinueBuffering = { viewModel.continueBuffering() },
+                            onLaunchNow = { viewModel.launchNowFromBuffer() },
+                            onCancel = { viewModel.cancelBuffering() },
+                            onChangeTargetMb = { viewModel.setTargetBufferMb(it) }
+                        )
+
                         if (showSettings) {
                             SettingsDialog(
                                 currentIp = uiState.ip,

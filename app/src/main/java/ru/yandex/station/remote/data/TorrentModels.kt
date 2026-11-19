@@ -38,3 +38,19 @@ data class PendingPeerRetry(
     val torrentHash: String,
     val movie: MovieItem
 )
+
+data class BufferingStatus(
+    val isVisible: Boolean = false,
+    val title: String = "",
+    val fileName: String = "",
+    val torrentHash: String = "",
+    val fileId: Int = 0,
+    val currentBytes: Long = 0L,
+    val targetBytes: Long = 10 * 1024 * 1024L, // 10 МБ буфер для плавного просмотра
+    val downloadSpeedBytes: Long = 0L,
+    val activePeers: Int = 0,
+    val totalPeers: Int = 0,
+    val isSlowWarning: Boolean = false,
+    val movie: MovieItem? = null,
+    val file: TorrentVideoFile? = null
+)

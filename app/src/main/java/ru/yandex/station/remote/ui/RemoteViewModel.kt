@@ -71,6 +71,7 @@ data class RemoteUiState(
     val isCleaningMemory: Boolean = false,
     val pendingEpisodeSelection: PendingEpisodeSelection? = null,
     val pendingPeerRetry: PendingPeerRetry? = null,
+    val bufferingStatus: BufferingStatus = BufferingStatus(),
     val torrServerLiveStats: TorrServerClient.ActiveTorrentStats? = null,
     val debugLogs: List<String> = emptyList(),
     // Витрина онлайн-кинотеатра и подборки
@@ -142,6 +143,9 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     private var activePositionSec: Long = 0L
     private var isPlaybackPaused: Boolean = false
     private var playbackMonitorJob: kotlinx.coroutines.Job? = null
+    private var bufferingJob: kotlinx.coroutines.Job? = null
+    private var userRequestedContinue: Boolean = false
+    private var targetBufferBytes: Long = 10 * 1024 * 1024L // 10 МБ по умолчанию
     private var heartbeatJob: kotlinx.coroutines.Job? = null
     private var manualCheckJob: kotlinx.coroutines.Job? = null
     private val refreshMutex = Mutex()
@@ -515,15 +519,36 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.value = _uiState.value.copy(lastMessage = "👆 Тап по центру экрана")
     }
 
-    // Управление медиаплеером YouTube / ТВ (мгновенное переключение с первого тапа)
+    // Управление медиаплеером YouTube / ТВ (надежное переключение с первого тапа)
     fun mediaPlayPause() {
         vibrate(40)
         cancelYouTubeAutoHide()
         lastUserActionTime = System.currentTimeMillis()
-        val nextPlaying = !_uiState.value.isPlaying
-        _uiState.value = _uiState.value.copy(isPlaying = nextPlaying)
-        isPlaybackPaused = !nextPlaying
-        fastCommandChannel.trySend("input keyevent 85")
+        val targetPlaying = !_uiState.value.isPlaying
+        _uiState.value = _uiState.value.copy(isPlaying = targetPlaying)
+        isPlaybackPaused = !targetPlaying
+
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val cmd = if (targetPlaying) {
+                "media dispatch play; input keyevent 126; input keyevent 85"
+            } else {
+                "media dispatch pause; input keyevent 127; input keyevent 85"
+            }
+            adbClient.executeFast(cmd)
+            if (targetPlaying) {
+                StationMediaManager.play(adbClient)
+            } else {
+                StationMediaManager.pause(adbClient)
+            }
+
+            delay(400)
+            val session = readVlcSession()
+            if (session != null) {
+                val realPlaying = session.first == 3
+                _uiState.value = _uiState.value.copy(isPlaying = realPlaying)
+                isPlaybackPaused = !realPlaying
+            }
+        }
     }
 
     fun mediaRewind() {
@@ -1280,49 +1305,137 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         else String.format(java.util.Locale.US, "%02d:%02d", m, s)
     }
 
+    fun setTargetBufferMb(mb: Int) {
+        vibrate(20)
+        targetBufferBytes = mb * 1024 * 1024L
+        if (_uiState.value.bufferingStatus.isVisible) {
+            _uiState.value = _uiState.value.copy(
+                bufferingStatus = _uiState.value.bufferingStatus.copy(targetBytes = targetBufferBytes)
+            )
+        }
+    }
+
+    fun continueBuffering() {
+        vibrate(30)
+        userRequestedContinue = true
+        _uiState.value = _uiState.value.copy(
+            bufferingStatus = _uiState.value.bufferingStatus.copy(isSlowWarning = false)
+        )
+    }
+
+    fun launchNowFromBuffer() {
+        vibrate(40)
+        val status = _uiState.value.bufferingStatus
+        val movie = status.movie
+        val file = status.file
+        if (movie != null && file != null) {
+            bufferingJob?.cancel()
+            viewModelScope.launch {
+                launchVlcPlayerDirect(status.torrentHash, file, movie)
+            }
+        }
+    }
+
+    fun cancelBuffering() {
+        vibrate(25)
+        bufferingJob?.cancel()
+        _uiState.value = _uiState.value.copy(
+            bufferingStatus = BufferingStatus(),
+            isCinemaLoading = false,
+            cinemaStatusMessage = "Запуск отменён"
+        )
+    }
+
     private suspend fun bufferAndLaunchFile(torrentHash: String, file: TorrentVideoFile, movie: MovieItem) {
         stopPlaybackMonitor()
-        val minBufferBytes = 1536 * 1024L // 1.5 МБ
+        bufferingJob?.cancel()
+        userRequestedContinue = false
+
         _uiState.value = _uiState.value.copy(
             isCinemaLoading = true,
-            cinemaStatusMessage = "Буферизация «${file.name}»: 0.0 / 1.5 МБ..."
+            bufferingStatus = BufferingStatus(
+                isVisible = true,
+                title = movie.title,
+                fileName = file.name,
+                torrentHash = torrentHash,
+                fileId = file.id,
+                currentBytes = 0L,
+                targetBytes = targetBufferBytes,
+                isSlowWarning = false,
+                movie = movie,
+                file = file
+            ),
+            cinemaStatusMessage = "Буферизация «${file.name}»..."
         )
+
         torrServerClient.preloadFile(torrentHash, file.id)
 
-        val filled = torrServerClient.waitForBuffer(
-            torrentHash = torrentHash,
-            minBytes = minBufferBytes,
-            maxWaitMs = 22000L
-        ) { currentBytes ->
-            val mb = String.format(java.util.Locale.US, "%.1f", currentBytes / (1024.0 * 1024.0))
-            _uiState.value = _uiState.value.copy(
-                cinemaStatusMessage = "Буферизация «${file.name}»: $mb / 1.5 МБ..."
-            )
-        }
+        bufferingJob = viewModelScope.launch {
+            val startTime = System.currentTimeMillis()
+            var warningShown = false
 
-        if (filled < 512 * 1024L) {
-            addLog("waitForBuffer FAIL: filled=$filled байт")
-            val errMsg = "Не удалось набрать буфер (нет пиров)"
-            _uiState.value = _uiState.value.copy(
-                isCinemaLoading = false,
-                cinemaStatusMessage = errMsg,
-                lastMessage = errMsg
-            )
-            return
+            while (isActive) {
+                val filled = torrServerClient.getCacheFilled(torrentHash)
+                val liveStats = torrServerClient.getActiveTorrentStats()
+
+                val elapsed = System.currentTimeMillis() - startTime
+                // Если прошло более 22 секунд, буфер еще не набран и пользователь еще не подтверждал продолжение
+                if (elapsed > 22000L && filled < targetBufferBytes && !userRequestedContinue && !warningShown) {
+                    warningShown = true
+                    _uiState.value = _uiState.value.copy(
+                        bufferingStatus = _uiState.value.bufferingStatus.copy(
+                            currentBytes = filled,
+                            targetBytes = targetBufferBytes,
+                            downloadSpeedBytes = liveStats?.downloadSpeedBytes ?: 0L,
+                            activePeers = liveStats?.activePeers ?: 0,
+                            totalPeers = liveStats?.totalPeers ?: 0,
+                            isSlowWarning = true
+                        )
+                    )
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        bufferingStatus = _uiState.value.bufferingStatus.copy(
+                            currentBytes = filled,
+                            targetBytes = targetBufferBytes,
+                            downloadSpeedBytes = liveStats?.downloadSpeedBytes ?: 0L,
+                            activePeers = liveStats?.activePeers ?: 0,
+                            totalPeers = liveStats?.totalPeers ?: 0,
+                            isSlowWarning = if (userRequestedContinue) false else _uiState.value.bufferingStatus.isSlowWarning
+                        )
+                    )
+                }
+
+                if (filled >= targetBufferBytes) {
+                    addLog("Буфер успешно набран: $filled байт (цель: $targetBufferBytes байт)")
+                    break
+                }
+
+                delay(500)
+            }
+
+            launchVlcPlayerDirect(torrentHash, file, movie)
         }
-        addLog("waitForBuffer OK: filled=$filled байт, запуск ADB...")
+    }
+
+    private suspend fun launchVlcPlayerDirect(torrentHash: String, file: TorrentVideoFile, movie: MovieItem) {
+        _uiState.value = _uiState.value.copy(
+            bufferingStatus = BufferingStatus(),
+            cinemaStatusMessage = "Запуск «${file.name}» на телевизоре..."
+        )
 
         val savedPosSec = historyRepo.getFilePositionSec(torrentHash, file.id)
         val posExtra = if (savedPosSec > 15L) "--ei position ${savedPosSec * 1000L} " else ""
+        val cacheExtra = "--ei network-caching 15000 --es extra_network_caching 15000 "
         val streamUrl = torrServerClient.getStreamUrl(torrentHash, file.id)
-        // Запускаем VLC плеер напрямую
+
+        // Запуск VLC плеера напрямую с увеличенным сетевым кэшем 15 секунд
         val adbCmd = "am force-stop org.smarttube.stable; am force-stop org.videolan.vlc; " +
             "(svc power stayon true; settings put secure screensaver_enabled 0; settings put secure enabled_accessibility_services ''; settings put secure accessibility_enabled 0; input keyevent 224) >/dev/null 2>&1 & " +
-            "am start -n org.videolan.vlc/.StartActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" $posExtra"
+            "am start -n org.videolan.vlc/.StartActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" $posExtra$cacheExtra"
         var adbResult = adbClient.execute(adbCmd)
 
         if (!adbResult.isSuccess) {
-            adbResult = adbClient.execute("am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" -p org.videolan.vlc $posExtra")
+            adbResult = adbClient.execute("am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" -p org.videolan.vlc $posExtra$cacheExtra")
         }
 
         if (adbResult.isSuccess) {

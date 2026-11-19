@@ -61,7 +61,11 @@ class ShowcaseRepository(context: Context) {
                         releaseYear = obj.optString("releaseYear", ""),
                         rating = obj.optDouble("rating", 8.0),
                         genre = obj.optString("genre", "RuTracker"),
-                        seeds = obj.optInt("seeds", 0)
+                        seeds = obj.optInt("seeds", 0),
+                        director = obj.optString("director", ""),
+                        country = obj.optString("country", ""),
+                        cast = obj.optString("cast", ""),
+                        voiceActing = obj.optString("voiceActing", "")
                     )
                 )
             }
@@ -89,6 +93,10 @@ class ShowcaseRepository(context: Context) {
                 put("rating", m.rating)
                 put("genre", m.genre)
                 put("seeds", m.seeds)
+                put("director", m.director)
+                put("country", m.country)
+                put("cast", m.cast)
+                put("voiceActing", m.voiceActing)
             }
             arr.put(obj)
         }

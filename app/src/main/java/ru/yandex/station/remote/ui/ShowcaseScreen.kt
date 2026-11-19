@@ -96,6 +96,8 @@ fun ShowcaseScreen(
         ShowcaseDetailsSheet(
             movie = movie,
             releases = uiState.movieReleases,
+            reviews = uiState.currentMovieReviews,
+            isLoadingReviews = uiState.isLoadingReviews,
             isLoading = uiState.isLoadingReleases,
             errorMessage = uiState.releasesError,
             onDismiss = { viewModel.dismissMovieReleases() },
@@ -106,6 +108,10 @@ fun ShowcaseScreen(
             },
             onPlayDirectTopic = {
                 viewModel.playRuTrackerTopic(movie.id, movie.title)
+            },
+            onOpenTopicInBrowser = {
+                viewModel.dismissMovieReleases()
+                onOpenCollections()
             }
         )
     }
@@ -622,13 +628,16 @@ fun ShowcaseFilterDialog(
 fun ShowcaseDetailsSheet(
     movie: MovieCatalogItem,
     releases: List<TorrentRelease>,
+    reviews: List<ru.yandex.station.remote.data.MovieReview> = emptyList(),
+    isLoadingReviews: Boolean = false,
     isLoading: Boolean,
     errorMessage: String?,
     onDismiss: () -> Unit,
     onBookmark: () -> Unit,
     onWatchLater: () -> Unit,
     onSelectRelease: (TorrentRelease) -> Unit,
-    onPlayDirectTopic: () -> Unit = {}
+    onPlayDirectTopic: () -> Unit = {},
+    onOpenTopicInBrowser: () -> Unit = {}
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -839,11 +848,52 @@ fun ShowcaseDetailsSheet(
                 }
             }
 
+            // Блок метаданных фильма (страна, режиссер, озвучка, актеры)
+            val hasMeta = movie.director.isNotBlank() || movie.country.isNotBlank() || movie.voiceActing.isNotBlank() || movie.cast.isNotBlank()
+            if (hasMeta) {
+                Spacer(modifier = Modifier.height(14.dp))
+                Surface(
+                    color = DarkSurfaceElevated,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (movie.country.isNotBlank()) {
+                            Row {
+                                Text("🌍 Страна: ", fontSize = 12.sp, color = TextSecondary, fontWeight = FontWeight.Bold)
+                                Text(movie.country, fontSize = 12.sp, color = TextPrimary)
+                            }
+                        }
+                        if (movie.director.isNotBlank()) {
+                            Row {
+                                Text("🎬 Режиссер: ", fontSize = 12.sp, color = TextSecondary, fontWeight = FontWeight.Bold)
+                                Text(movie.director, fontSize = 12.sp, color = TextPrimary)
+                            }
+                        }
+                        if (movie.voiceActing.isNotBlank()) {
+                            Row {
+                                Text("🎙️ Озвучка: ", fontSize = 12.sp, color = TextSecondary, fontWeight = FontWeight.Bold)
+                                Text(movie.voiceActing, fontSize = 12.sp, color = TextPrimary)
+                            }
+                        }
+                        if (movie.cast.isNotBlank()) {
+                            Row {
+                                Text("👥 В ролях: ", fontSize = 12.sp, color = TextSecondary, fontWeight = FontWeight.Bold)
+                                Text(movie.cast, fontSize = 12.sp, color = TextPrimary)
+                            }
+                        }
+                    }
+                }
+            }
+
             // Полный развернутый синопсис сюжета
             if (movie.overview.isNotBlank()) {
                 Spacer(modifier = Modifier.height(14.dp))
                 Text(
-                    text = "О фильме",
+                    text = "📖 Сюжет",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                     color = AccentYandex
@@ -855,6 +905,116 @@ fun ShowcaseDetailsSheet(
                     color = TextPrimary,
                     lineHeight = 18.sp
                 )
+            }
+
+            // Живые отзывы зрителей с RuTracker
+            if (movie.id > 100000) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "💬 ОТЗЫВЫ ЗРИТЕЛЕЙ С RUTRACKER",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentYandex,
+                        letterSpacing = 1.sp
+                    )
+                    if (reviews.isNotEmpty()) {
+                        Text(
+                            text = "${reviews.size}",
+                            fontSize = 11.sp,
+                            color = TextSecondary
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (isLoadingReviews) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(70.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(color = AccentYandex, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("Загрузка мнений зрителей...", color = TextSecondary, fontSize = 12.sp)
+                        }
+                    }
+                } else if (reviews.isEmpty()) {
+                    Surface(
+                        color = DarkSurfaceElevated,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Отзывов к этой теме пока нет. Вы можете перейти к раздаче и оставить первое мнение!",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        reviews.forEach { rev ->
+                            Surface(
+                                color = DarkSurfaceElevated,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = rev.author,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = AccentYandex
+                                        )
+                                        if (rev.date.isNotBlank()) {
+                                            Text(
+                                                text = rev.date,
+                                                fontSize = 10.sp,
+                                                color = TextSecondary
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = rev.text,
+                                        fontSize = 12.sp,
+                                        color = TextPrimary,
+                                        lineHeight = 16.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onOpenTopicInBrowser,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.OpenInBrowser,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = AccentYandex
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Открыть всё обсуждение на RuTracker", fontSize = 12.sp)
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))

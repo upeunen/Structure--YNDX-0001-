@@ -85,7 +85,9 @@ data class RemoteUiState(
     val isSearchingCatalog: Boolean = false,
     val isShowcaseFilterOpen: Boolean = false,
     val enabledShowcaseCategories: Set<String> = emptySet(),
-    val isRuTrackerCaptchaWaiting: Boolean = false
+    val isRuTrackerCaptchaWaiting: Boolean = false,
+    val currentMovieReviews: List<MovieReview> = emptyList(),
+    val isLoadingReviews: Boolean = false
 )
 
 class RemoteViewModel(application: Application) : AndroidViewModel(application) {
@@ -2007,14 +2009,51 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         addLog("Витрина: сгенерирована случайная подборка (${randomSec.movies.size} фильмов)")
     }
 
+    private var reviewsLoadJob: kotlinx.coroutines.Job? = null
+
+    fun loadMovieReviews(topicId: Long) {
+        reviewsLoadJob?.cancel()
+        _uiState.value = _uiState.value.copy(
+            isLoadingReviews = true,
+            currentMovieReviews = emptyList()
+        )
+        val cookies = prefs.rutrackerCookies
+        val ua = prefs.rutrackerUserAgent
+        val baseUrl = prefs.lastRutrackerUrl.ifBlank { RuTrackerScraper.DEFAULT_BASE_URL }
+
+        reviewsLoadJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val reviews = RuTrackerScraper.fetchTopicReviews(baseUrl, cookies, ua, topicId)
+                _uiState.value = _uiState.value.copy(
+                    currentMovieReviews = reviews,
+                    isLoadingReviews = false
+                )
+            } catch (e: RuTrackerCaptchaException) {
+                _uiState.value = _uiState.value.copy(
+                    isLoadingReviews = false,
+                    isRuTrackerCaptchaWaiting = true
+                )
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(isLoadingReviews = false)
+            }
+        }
+    }
+
     fun selectMovieForReleases(movie: MovieCatalogItem) {
         vibrate(30)
         _uiState.value = _uiState.value.copy(
             selectedCatalogMovie = movie,
             isLoadingReleases = true,
             movieReleases = emptyList(),
-            releasesError = null
+            releasesError = null,
+            currentMovieReviews = emptyList(),
+            isLoadingReviews = movie.id > 100000L
         )
+
+        if (movie.id > 100000L) {
+            loadMovieReviews(movie.id)
+        }
+
         viewModelScope.launch {
             val list = TorrentSearchService.searchReleases(
                 movieTitle = movie.title,
@@ -2027,7 +2066,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 val ruRelease = TorrentRelease(
                     title = "⚡ Оригинальная раздача с RuTracker [${movie.genre}]",
                     size = "RuTracker",
-                    seeds = 100,
+                    seeds = if (movie.seeds > 0) movie.seeds else 100,
                     magnetUrl = "rutracker_topic_${movie.id}"
                 )
                 list.add(0, ruRelease)
@@ -2042,11 +2081,14 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun dismissMovieReleases() {
+        reviewsLoadJob?.cancel()
         _uiState.value = _uiState.value.copy(
             selectedCatalogMovie = null,
             movieReleases = emptyList(),
             isLoadingReleases = false,
-            releasesError = null
+            releasesError = null,
+            currentMovieReviews = emptyList(),
+            isLoadingReviews = false
         )
     }
 

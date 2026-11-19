@@ -220,23 +220,35 @@ object RuTrackerScraper {
                     throw RuTrackerCaptchaException("RuTracker запросил проверку пользователя на странице темы")
                 }
 
-                val (poster, overview) = extractPosterAndOverview(html)
+                val topicData = extractTopicData(html)
                 val parsedRating = extractRatingFromTopic(html)
 
-                var finalPoster = poster
+                var finalPoster = topicData.posterUrl
                 if (finalPoster.isBlank()) {
                     finalPoster = MovieCatalogService.findPoster(item.title, item.originalTitle)
                 }
                 if (finalPoster.isBlank()) {
                     finalPoster = MovieCatalogService.fetchOnlinePoster(item.title, item.originalTitle, item.releaseYear)
                 }
-                val finalOverview = if (overview.isNotBlank()) overview else item.overview
+
+                var finalOverview = topicData.overview
+                if (finalOverview.isBlank()) {
+                    finalOverview = MovieCatalogService.fetchOnlineOverview(item.title, item.originalTitle)
+                }
+                if (finalOverview.isBlank()) {
+                    finalOverview = item.overview
+                }
+
                 val finalRating = if (parsedRating > 0.0) parsedRating else (if (item.rating > 0.0) item.rating else 0.0)
 
                 item.copy(
                     posterUrl = finalPoster,
                     overview = finalOverview,
-                    rating = finalRating
+                    rating = finalRating,
+                    director = topicData.director.ifBlank { item.director },
+                    country = topicData.country.ifBlank { item.country },
+                    cast = topicData.cast.ifBlank { item.cast },
+                    voiceActing = topicData.voiceActing.ifBlank { item.voiceActing }
                 )
             } else {
                 conn.disconnect()
@@ -249,12 +261,24 @@ object RuTrackerScraper {
         }
     }
 
+    data class ParsedTopicData(
+        val posterUrl: String,
+        val overview: String,
+        val director: String,
+        val country: String,
+        val cast: String,
+        val voiceActing: String
+    )
+
     fun extractPosterAndOverview(html: String): Pair<String, String> {
+        val data = extractTopicData(html)
+        return Pair(data.posterUrl, data.overview)
+    }
+
+    fun extractTopicData(html: String): ParsedTopicData {
         var posterUrl = ""
 
         // 1. Поиск постера в разметке RuTracker
-        // <var class="postImg postImgAligned img-right" title="URL">
-        // или <var class="postImg" title="URL">
         val varImgPattern = Pattern.compile(
             """<var[^>]+class=["'][^"']*postImg[^"']*["'][^>]+title=["']([^"']+)["']""",
             Pattern.CASE_INSENSITIVE
@@ -264,7 +288,6 @@ object RuTrackerScraper {
             posterUrl = mVar.group(1)?.trim() ?: ""
         }
 
-        // 2. Если не нашли через var, ищем тег img с классом postImg
         if (posterUrl.isBlank()) {
             val imgPattern = Pattern.compile(
                 """<img[^>]+class=["'][^"']*postImg[^"']*["'][^>]+src=["']([^"']+)["']""",
@@ -276,7 +299,6 @@ object RuTrackerScraper {
             }
         }
 
-        // 3. Запасной поиск: любой тег var или img со ссылкой на картинку
         if (posterUrl.isBlank()) {
             val anyImgPattern = Pattern.compile(
                 """(?:title|src)=["'](https?://[^"']+\.(?:jpg|jpeg|png|webp)[^"']*)["']""",
@@ -288,26 +310,172 @@ object RuTrackerScraper {
             }
         }
 
-        // Нормализация URL постера
         if (posterUrl.startsWith("//")) {
             posterUrl = "https:$posterUrl"
         } else if (posterUrl.startsWith("http://")) {
             posterUrl = posterUrl.replaceFirst("http://", "https://")
         }
 
-        // 4. Извлечение синопсиса сюжета
+        // 2. Полный связный сюжет (захватываем все абзацы сюжета)
         var overview = ""
-        val overviewPattern = Pattern.compile(
-            """(?:Описание|О фильме|Сюжет|Синопсис)\s*:\s*(?:</b>)?\s*(.*?)(?:<br\s*/?>|<div|<span|<b|\n)""",
-            Pattern.CASE_INSENSITIVE
+        val fullOverviewPattern = Pattern.compile(
+            """(?:Описание|О фильме|Сюжет|Синопсис)\s*:\s*(?:</b>)?(.*?)(?:(?:<br\s*/?>\s*)*<b\b[^>]*>\s*(?:Качество|Формат|Видео|Аудио|Файл|Субтитры|Релиз|Перевод|Доп|Техданные)|<div class=["']sp-wrap|<hr|</div>\s*<div|\z)""",
+            Pattern.CASE_INSENSITIVE or Pattern.DOTALL
         )
-        val mOver = overviewPattern.matcher(html)
-        if (mOver.find()) {
-            val rawOver = mOver.group(1) ?: ""
-            overview = cleanHtmlEntities(rawOver).take(450).trim()
+        val mFullOver = fullOverviewPattern.matcher(html)
+        if (mFullOver.find()) {
+            val raw = mFullOver.group(1) ?: ""
+            val clean = cleanHtmlEntities(raw)
+                .replace(Regex("""\n\s*\n+"""), "\n\n")
+                .trim()
+            if (clean.length > 20) {
+                overview = clean.take(1500)
+            }
         }
 
-        return Pair(posterUrl, overview)
+        if (overview.isBlank()) {
+            val fallbackPattern = Pattern.compile(
+                """(?:Описание|О фильме|Сюжет|Синопсис)\s*:\s*(?:</b>)?\s*(.*?)(?:<br\s*/?>\s*<br|<div|<b\b|\n\n)""",
+                Pattern.CASE_INSENSITIVE or Pattern.DOTALL
+            )
+            val mFall = fallbackPattern.matcher(html)
+            if (mFall.find()) {
+                overview = cleanHtmlEntities(mFall.group(1) ?: "").take(1000).trim()
+            }
+        }
+
+        // 3. Режиссер
+        var director = ""
+        val dirMatch = Regex("""(?:Режиссер|Режиссёр)\s*[:：]\s*(?:</b>)?\s*(.*?)(?:<br|\n|</b>|</div>)""", RegexOption.IGNORE_CASE).find(html)
+        if (dirMatch != null) {
+            director = cleanHtmlEntities(dirMatch.groupValues[1]).take(120).trim()
+        }
+
+        // 4. Страна
+        var country = ""
+        val countryMatch = Regex("""(?:Страна|Производство)\s*[:：]\s*(?:</b>)?\s*(.*?)(?:<br|\n|</b>)""", RegexOption.IGNORE_CASE).find(html)
+        if (countryMatch != null) {
+            country = cleanHtmlEntities(countryMatch.groupValues[1]).take(100).trim()
+        }
+
+        // 5. В ролях / Актеры
+        var cast = ""
+        val castMatch = Regex("""(?:В ролях|Актеры|Актёры)\s*[:：]\s*(?:</b>)?\s*(.*?)(?:<br\s*/?>\s*<br|<div|<b\b|\n\n)""", RegexOption.IGNORE_CASE).find(html)
+        if (castMatch != null) {
+            cast = cleanHtmlEntities(castMatch.groupValues[1]).take(300).trim()
+        }
+
+        // 6. Перевод / Озвучка
+        var voiceActing = ""
+        val voiceMatch = Regex("""(?:Перевод|Озвучивание|Озвучка|Аудио)\s*[:：]\s*(?:</b>)?\s*(.*?)(?:<br|\n|</b>)""", RegexOption.IGNORE_CASE).find(html)
+        if (voiceMatch != null) {
+            voiceActing = cleanHtmlEntities(voiceMatch.groupValues[1]).take(150).trim()
+        }
+
+        return ParsedTopicData(
+            posterUrl = posterUrl,
+            overview = overview,
+            director = director,
+            country = country,
+            cast = cast,
+            voiceActing = voiceActing
+        )
+    }
+
+    suspend fun fetchTopicReviews(
+        baseUrl: String,
+        cookies: String,
+        userAgent: String,
+        topicId: Long
+    ): List<MovieReview> = withContext(Dispatchers.IO) {
+        val cleanBase = getCleanBaseUrl(baseUrl)
+        val topicUrl = "$cleanBase/viewtopic.php?t=$topicId"
+        try {
+            val conn = (URL(topicUrl).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 7000
+                readTimeout = 9000
+                instanceFollowRedirects = true
+                if (cookies.isNotBlank()) setRequestProperty("Cookie", cookies)
+                setRequestProperty(
+                    "User-Agent",
+                    if (userAgent.isNotBlank()) userAgent
+                    else "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                )
+                setRequestProperty("Referer", "$cleanBase/index.php")
+            }
+
+            if (conn.responseCode == 403 || conn.responseCode == 503 || conn.responseCode == 429) {
+                conn.disconnect()
+                throw RuTrackerCaptchaException("RuTracker вернул код ${conn.responseCode} (капча)")
+            }
+
+            if (conn.responseCode !in 200..299) {
+                conn.disconnect()
+                return@withContext emptyList()
+            }
+
+            val contentType = conn.contentType ?: ""
+            val charsetName = if (contentType.contains("utf-8", ignoreCase = true)) "UTF-8" else "windows-1251"
+            val html = conn.inputStream.bufferedReader(charset(charsetName)).readText()
+            conn.disconnect()
+
+            if (isCaptchaOrBlocked(conn.responseCode, html)) {
+                throw RuTrackerCaptchaException("RuTracker запросил проверку пользователя на странице темы")
+            }
+
+            parseReviewsFromHtml(html)
+        } catch (e: RuTrackerCaptchaException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun parseReviewsFromHtml(html: String): List<MovieReview> {
+        val reviews = mutableListOf<MovieReview>()
+        val postBlocks = html.split(Regex("""<tbody\s+id=["']post_\d+["']|<div\s+class=["'][^"']*post_wrap[^"']*["']""", RegexOption.IGNORE_CASE))
+
+        // Первый пост — это сама раздача, отзывы пользователей начинаются дальше
+        val userPosts = if (postBlocks.size > 2) postBlocks.drop(2) else postBlocks.drop(1)
+
+        for (post in userPosts) {
+            if (reviews.size >= 8) break
+
+            val nickMatch = Regex("""class=["'][^"']*nick[^"']*["'][^>]*>(?:<[^>]+>)*([^<]+)""", RegexOption.IGNORE_CASE).find(post)
+            val author = nickMatch?.groupValues?.get(1)?.trim() ?: ""
+            if (author.isBlank()) continue
+
+            val dateMatch = Regex("""class=["'][^"']*p-link[^"']*["'][^>]*>(?:<[^>]+>)*([^<]+)""", RegexOption.IGNORE_CASE).find(post)
+                ?: Regex("""class=["'][^"']*post-time[^"']*["'][^>]*>(?:<[^>]+>)*([^<]+)""", RegexOption.IGNORE_CASE).find(post)
+            val date = dateMatch?.groupValues?.get(1)?.trim() ?: ""
+
+            val bodyMatch = Pattern.compile(
+                """<div[^>]+class=["'][^"']*post_body[^"']*["'][^>]*>(.*?)</div>""",
+                Pattern.CASE_INSENSITIVE or Pattern.DOTALL
+            ).matcher(post)
+
+            if (bodyMatch.find()) {
+                var rawBody = bodyMatch.group(1) ?: ""
+                rawBody = Pattern.compile("""<div\s+class=["']q-wrap["']>.*?</div>""", Pattern.DOTALL or Pattern.CASE_INSENSITIVE).matcher(rawBody).replaceAll("")
+                rawBody = Pattern.compile("""<div\s+class=["']sp-wrap["']>.*?</div>""", Pattern.DOTALL or Pattern.CASE_INSENSITIVE).matcher(rawBody).replaceAll("")
+
+                val cleanText = cleanHtmlEntities(rawBody)
+                    .replace(Regex("""\s+"""), " ")
+                    .trim()
+
+                if (cleanText.length in 12..600) {
+                    reviews.add(
+                        MovieReview(
+                            author = author,
+                            date = date,
+                            text = cleanText
+                        )
+                    )
+                }
+            }
+        }
+        return reviews
     }
 
     private fun queryHtml(

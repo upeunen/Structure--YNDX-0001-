@@ -7,6 +7,12 @@ import java.net.URL
 import org.json.JSONArray
 import org.json.JSONObject
 
+data class MovieReview(
+    val author: String,
+    val date: String,
+    val text: String
+)
+
 data class MovieCatalogItem(
     val id: Long,
     val title: String,
@@ -17,7 +23,11 @@ data class MovieCatalogItem(
     val releaseYear: String,
     val rating: Double,
     val genre: String = "",
-    val seeds: Int = 0
+    val seeds: Int = 0,
+    val director: String = "",
+    val country: String = "",
+    val cast: String = "",
+    val voiceActing: String = ""
 )
 
 data class MovieSection(
@@ -669,6 +679,38 @@ object MovieCatalogService {
                 val poster = imgObj?.optString("medium", "") ?: ""
                 if (poster.isNotBlank()) {
                     return@withContext if (poster.startsWith("http://")) poster.replaceFirst("http://", "https://") else poster
+                }
+            } else {
+                conn.disconnect()
+            }
+        } catch (_: Exception) {}
+        ""
+    }
+
+    suspend fun fetchOnlineOverview(title: String, originalTitle: String = ""): String = withContext(Dispatchers.IO) {
+        val query = originalTitle.ifBlank { title }.trim()
+        if (query.isBlank()) return@withContext ""
+        try {
+            val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+            val u = URL("https://api.tvmaze.com/singlesearch/shows?q=$encoded")
+            val conn = (u.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 3500
+                readTimeout = 4000
+            }
+            if (conn.responseCode in 200..299) {
+                val jsonStr = conn.inputStream.bufferedReader().readText()
+                conn.disconnect()
+                val json = JSONObject(jsonStr)
+                val summaryHtml = json.optString("summary", "")
+                if (summaryHtml.isNotBlank()) {
+                    return@withContext summaryHtml
+                        .replace(Regex("<[^>]+>"), "")
+                        .replace("&quot;", "\"")
+                        .replace("&#039;", "'")
+                        .replace("&amp;", "&")
+                        .replace("&nbsp;", " ")
+                        .trim()
                 }
             } else {
                 conn.disconnect()

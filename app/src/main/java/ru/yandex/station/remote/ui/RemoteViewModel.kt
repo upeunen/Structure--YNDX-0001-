@@ -86,6 +86,8 @@ data class RemoteUiState(
     val isSearchingCatalog: Boolean = false,
     val isShowcaseFilterOpen: Boolean = false,
     val enabledShowcaseCategories: Set<String> = emptySet(),
+    val customAddedCategories: Set<String> = emptySet(),
+    val showcaseCategorySearchQuery: String = "",
     val isRuTrackerCaptchaWaiting: Boolean = false,
     val currentMovieReviews: List<MovieReview> = emptyList(),
     val isLoadingReviews: Boolean = false
@@ -105,13 +107,8 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             rutrackerPass = prefs.rutrackerPassword,
             youtubeHistory = youtubeHistoryRepo.getHistory(),
             cinemaMovies = historyRepo.getHistory(),
-            enabledShowcaseCategories = if (prefs.enabledRuTrackerCategories.size <= 8) {
-                val full = RuTrackerScraper.CATEGORIES.map { it.id }.toSet()
-                prefs.enabledRuTrackerCategories = full
-                full
-            } else {
-                prefs.enabledRuTrackerCategories
-            }
+            customAddedCategories = prefs.customAddedCategories,
+            enabledShowcaseCategories = prefs.enabledRuTrackerCategories
         )
     )
     val uiState: StateFlow<RemoteUiState> = _uiState.asStateFlow()
@@ -1767,11 +1764,51 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     // === Управление онлайн-витриной и раздачами ===
 
     fun openShowcaseFilter() {
-        _uiState.value = _uiState.value.copy(isShowcaseFilterOpen = true)
+        _uiState.value = _uiState.value.copy(isShowcaseFilterOpen = true, showcaseCategorySearchQuery = "")
     }
 
     fun closeShowcaseFilter() {
-        _uiState.value = _uiState.value.copy(isShowcaseFilterOpen = false)
+        _uiState.value = _uiState.value.copy(isShowcaseFilterOpen = false, showcaseCategorySearchQuery = "")
+    }
+
+    fun setShowcaseCategorySearchQuery(query: String) {
+        _uiState.value = _uiState.value.copy(showcaseCategorySearchQuery = query)
+    }
+
+    fun addCategoryFromCatalog(categoryId: String) {
+        val custom = _uiState.value.customAddedCategories.toMutableSet()
+        custom.add(categoryId)
+        prefs.customAddedCategories = custom
+
+        val enabled = _uiState.value.enabledShowcaseCategories.toMutableSet()
+        enabled.add(categoryId)
+        prefs.enabledRuTrackerCategories = enabled
+
+        _uiState.value = _uiState.value.copy(
+            customAddedCategories = custom,
+            enabledShowcaseCategories = enabled
+        )
+        vibrate(30)
+        showMessage("Полка добавлена на Витрину")
+        addLog("Полки: добавлена полка $categoryId")
+    }
+
+    fun removeCategoryFromCatalog(categoryId: String) {
+        val custom = _uiState.value.customAddedCategories.toMutableSet()
+        custom.remove(categoryId)
+        prefs.customAddedCategories = custom
+
+        val enabled = _uiState.value.enabledShowcaseCategories.toMutableSet()
+        enabled.remove(categoryId)
+        prefs.enabledRuTrackerCategories = enabled
+
+        _uiState.value = _uiState.value.copy(
+            customAddedCategories = custom,
+            enabledShowcaseCategories = enabled
+        )
+        vibrate(20)
+        showMessage("Полка удалена")
+        addLog("Полки: удалена полка $categoryId")
     }
 
     fun toggleShowcaseCategory(categoryId: String) {
@@ -1781,24 +1818,36 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         } else {
             current.add(categoryId)
         }
+        prefs.enabledRuTrackerCategories = current
         _uiState.value = _uiState.value.copy(enabledShowcaseCategories = current)
     }
 
     fun selectAllShowcaseCategories() {
-        val all = RuTrackerScraper.CATEGORIES.map { it.id }.toSet()
-        _uiState.value = _uiState.value.copy(enabledShowcaseCategories = all)
+        val visible = (RuTrackerScraper.DEFAULT_CATEGORIES.map { it.id } + _uiState.value.customAddedCategories).toSet()
+        prefs.enabledRuTrackerCategories = visible
+        _uiState.value = _uiState.value.copy(enabledShowcaseCategories = visible)
     }
 
     fun unselectAllShowcaseCategories() {
+        prefs.enabledRuTrackerCategories = emptySet()
         _uiState.value = _uiState.value.copy(enabledShowcaseCategories = emptySet())
+    }
+
+    fun applyShowcaseCategories() {
+        prefs.enabledRuTrackerCategories = _uiState.value.enabledShowcaseCategories
+        closeShowcaseFilter()
+        loadMovieCatalog(forceRefreshRuTracker = false)
+        syncRuTrackerCategoriesInBackground(force = true)
+        showMessage("Полки сохранены и обновляются")
     }
 
     fun applyShowcaseCategoriesAndOpenBrowser() {
         prefs.enabledRuTrackerCategories = _uiState.value.enabledShowcaseCategories
         closeShowcaseFilter()
         loadMovieCatalog(forceRefreshRuTracker = false)
+        syncRuTrackerCategoriesInBackground(force = true)
         setAppScreen(AppScreen.COLLECTIONS)
-        showMessage("Разделы сохранены. Пройдите проверку на RuTracker")
+        showMessage("Полки сохранены. Открыт RuTracker")
     }
 
     fun clearEntireShowcase() {

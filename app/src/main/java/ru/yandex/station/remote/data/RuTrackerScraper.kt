@@ -18,7 +18,7 @@ object RuTrackerScraper {
 
     const val DEFAULT_BASE_URL = "https://rutracker.org/forum"
 
-    val CATEGORIES = listOf(
+    val DEFAULT_CATEGORIES = listOf(
         RuTrackerCategory("rutracker_hot_movies", "🔥 Новинки зарубежного кино", 7),
         RuTrackerCategory("rutracker_russian_movies", "🇷🇺 Наше современное кино", 22),
         RuTrackerCategory("rutracker_soviet_movies", "📽️ Советское кино (СССР)", 941),
@@ -34,6 +34,28 @@ object RuTrackerScraper {
         RuTrackerCategory("rutracker_doc", "📚 Документальное кино", 1460),
         RuTrackerCategory("rutracker_concerts", "🎸 Музыкальные концерты", 314)
     )
+
+    val CATALOG_CATEGORIES = listOf(
+        RuTrackerCategory("rutracker_theater", "🎭 Театр, спектакли и балет", 93),
+        RuTrackerCategory("rutracker_humor", "😂 Юмор, Stand-Up и КВН", 393),
+        RuTrackerCategory("rutracker_cartoons_ussr", "🐻 Мультфильмы СССР", 209),
+        RuTrackerCategory("rutracker_cartoons_short", "🐥 Короткометражная анимация", 114),
+        RuTrackerCategory("rutracker_doc_space", "🔭 Документальное: Космос и наука", 2112),
+        RuTrackerCategory("rutracker_doc_nature", "🐾 Документальное: Природа и фауна", 934),
+        RuTrackerCategory("rutracker_doc_history", "🏛️ Документальное: История и эпохи", 2323),
+        RuTrackerCategory("rutracker_sport", "⚽ Спортивные передачи и матчи", 257),
+        RuTrackerCategory("rutracker_retro", "📼 Фильмы до 1990 года (Ретро)", 187),
+        RuTrackerCategory("rutracker_short_movies", "🎞️ Короткометражное кино", 212),
+        RuTrackerCategory("rutracker_asia_movies", "🐉 Азиатское кино (Восток)", 938),
+        RuTrackerCategory("rutracker_india", "💃 Индийское кино (Болливуд)", 225),
+        RuTrackerCategory("rutracker_music_films", "🎼 Музыкальные фильмы и мюзиклы", 940),
+        RuTrackerCategory("rutracker_tv_shows", "📺 Телепередачи и развлекательные шоу", 1468),
+        RuTrackerCategory("rutracker_kids_movies", "🎠 Детские фильмы и сказки", 213),
+        RuTrackerCategory("rutracker_kids_series", "🦄 Мультсериалы для детей", 242),
+        RuTrackerCategory("rutracker_audiobooks", "🎧 Аудиокниги и радиоспектакли", 492)
+    )
+
+    val CATEGORIES = DEFAULT_CATEGORIES + CATALOG_CATEGORIES
 
     private val STOP_WORDS = listOf(
         "правила", "правило", "faq", "инструкц", "навигатор", "объявлен", "внимани",
@@ -362,13 +384,14 @@ object RuTrackerScraper {
                 }
             }
 
-            val stopKeywords = listOf("качество", "формат", "видео", "аудио", "субтитры", "звук", "продолжительность", "время", "релиз", "перевод", "доп. информация", "скриншоты", "sp-wrap", "<hr")
-            var endIdx = (cur + 1600).coerceAtMost(html.length)
-            for (skw in stopKeywords) {
-                val found = lowerHtml.indexOf(skw, cur)
-                if (found in cur until endIdx) {
-                    endIdx = found
-                }
+            // Ищем реальный конец сюжета: технический блок раздачи (Качество, Формат, Видео, Аудио, Субтитры) или разделители (<hr, sp-wrap, attach, /td)
+            var endIdx = (cur + 3500).coerceAtMost(html.length)
+            val techMatcher = Pattern.compile(
+                """(?i)(?:<hr\b|<div\s+class=["']sp-wrap|<fieldset|<div\s+class=["']attach|</td>|(?:<br\s*/?>|\n)\s*(?:<span[^>]*class=["'][^"']*post-b[^"']*["']>|<b\b|<strong\b)?\s*(?:Качество|Формат(?:\s+файла)?|Видео(?:\s*кодек|\s*формат)?|Аудио(?:\s*кодек)?|Звук(?:\s*дорожки)?|Субтитры|Продолжительность|Перевод|Релиз(?:\s*группа)?|Техданные|MediaInfo|Размер\s+файла)\s*[:：])"""
+            ).matcher(html)
+
+            if (techMatcher.find(cur) && techMatcher.start() < endIdx) {
+                endIdx = techMatcher.start()
             }
 
             if (endIdx > cur) {
@@ -377,19 +400,19 @@ object RuTrackerScraper {
                     .replace(Regex("""\n\s*\n+"""), "\n\n")
                     .trim()
                 if (cleaned.length >= 20) {
-                    overview = cleaned.take(1500)
+                    overview = cleaned.take(3000)
                 }
             }
         }
 
         if (overview.isBlank()) {
             val fallbackPattern = Pattern.compile(
-                """(?:Описание|О фильме|Сюжет|Синопсис)\s*:\s*(?:</b>)?\s*(.*?)(?:<br\s*/?>\s*<br|<div|<b\b|\n\n)""",
+                """(?:Описание|О фильме|Сюжет|Синопсис)\s*[:：]\s*(?:</b>)?\s*(.*?)(?:(?:<br\s*/?>|\n)\s*(?:<span[^>]*class=["'][^"']*post-b|<b\b|<strong\b|Качество|Формат|Видео|Аудио|<div|<hr)|$)""",
                 Pattern.CASE_INSENSITIVE or Pattern.DOTALL
             )
             val mFall = fallbackPattern.matcher(html)
             if (mFall.find()) {
-                overview = cleanHtmlEntities(mFall.group(1) ?: "").take(1000).trim()
+                overview = cleanHtmlEntities(mFall.group(1) ?: "").take(2500).trim()
             }
         }
 
@@ -491,32 +514,44 @@ object RuTrackerScraper {
             if (reviews.size >= 8) break
 
             var author = ""
-            val nickIdx = post.indexOf("class=\"nick")
-            if (nickIdx != -1) {
-                val nickBlock = post.substring(nickIdx, (nickIdx + 250).coerceAtMost(post.length))
-                val nickEnd = nickBlock.indexOf("</p>").let { if (it != -1) it else nickBlock.indexOf("</td>") }
-                if (nickEnd != -1) {
-                    author = cleanHtmlEntities(nickBlock.substring(0, nickEnd)).trim()
+            val nickPattern = Pattern.compile(
+                """<[a-z0-9]+\s+[^>]*class=["'][^"']*\bnick\b[^"']*["'][^>]*>(.*?)</[a-z0-9]+>""",
+                Pattern.CASE_INSENSITIVE or Pattern.DOTALL
+            )
+            val nickMatcher = nickPattern.matcher(post)
+            if (nickMatcher.find()) {
+                author = cleanHtmlEntities(nickMatcher.group(1) ?: "").trim()
+            }
+            if (author.isBlank()) {
+                val clickMatcher = Pattern.compile("""onclickPoster\(['"]([^'"]+)['"]""", Pattern.CASE_INSENSITIVE).matcher(post)
+                if (clickMatcher.find()) {
+                    author = clickMatcher.group(1)?.trim() ?: ""
                 }
             }
             if (author.isBlank()) {
-                val nickMatch = Regex("""class=["'][^"']*nick[^"']*["'][^>]*>(?:<[^>]+>)*\s*([^<>\n]+)""", RegexOption.IGNORE_CASE).find(post)
-                author = nickMatch?.groupValues?.get(1)?.trim() ?: ""
+                val simpleNick = Regex("""class=["'][^"']*nick[^"']*["'][^>]*>([^<]+)<""", RegexOption.IGNORE_CASE).find(post)
+                author = simpleNick?.groupValues?.get(1)?.trim() ?: ""
             }
             if (author.isBlank()) continue
 
             var date = ""
-            val pLinkIdx = post.indexOf("class=\"p-link")
-            if (pLinkIdx != -1) {
-                val pLinkBlock = post.substring(pLinkIdx, (pLinkIdx + 150).coerceAtMost(post.length))
-                val pLinkEnd = pLinkBlock.indexOf("</a>")
-                if (pLinkEnd != -1) {
-                    date = cleanHtmlEntities(pLinkBlock.substring(0, pLinkEnd)).trim()
-                }
+            val pLinkPattern = Pattern.compile(
+                """<a\s+[^>]*class=["'][^"']*\bp-link\b[^"']*["'][^>]*>(.*?)</a>""",
+                Pattern.CASE_INSENSITIVE or Pattern.DOTALL
+            )
+            val pLinkMatcher = pLinkPattern.matcher(post)
+            if (pLinkMatcher.find()) {
+                date = cleanHtmlEntities(pLinkMatcher.group(1) ?: "").trim()
             }
             if (date.isBlank()) {
-                val dateMatch = Regex("""class=["'][^"']*post-time[^"']*["'][^>]*>(?:<[^>]+>)*\s*([^<>\n]+)""", RegexOption.IGNORE_CASE).find(post)
-                date = dateMatch?.groupValues?.get(1)?.trim() ?: ""
+                val timePattern = Pattern.compile(
+                    """class=["'][^"']*post-time[^"']*["'][^>]*>(?:<[^>]+>)*\s*([0-9A-Za-zА-Яа-яЁё\s\-:.,]{5,30})""",
+                    Pattern.CASE_INSENSITIVE
+                )
+                val timeMatcher = timePattern.matcher(post)
+                if (timeMatcher.find()) {
+                    date = cleanHtmlEntities(timeMatcher.group(1) ?: "").trim()
+                }
             }
 
             val bodyIdx = post.indexOf("class=\"post_body")
@@ -540,7 +575,7 @@ object RuTrackerScraper {
                 .replace(Regex("""\s+"""), " ")
                 .trim()
 
-            if (cleanText.length in 10..700) {
+            if (cleanText.length in 10..900) {
                 reviews.add(
                     MovieReview(
                         author = author,

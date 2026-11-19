@@ -132,9 +132,15 @@ fun CollectionsScreen(
     if (uiState.isShowcaseFilterOpen) {
         ShowcaseFilterDialog(
             enabledCategories = uiState.enabledShowcaseCategories,
+            customAddedCategories = uiState.customAddedCategories,
+            searchQuery = uiState.showcaseCategorySearchQuery,
+            onSearchQueryChange = { viewModel.setShowcaseCategorySearchQuery(it) },
+            onAddCategory = { viewModel.addCategoryFromCatalog(it) },
+            onRemoveCategory = { viewModel.removeCategoryFromCatalog(it) },
             onToggleCategory = { viewModel.toggleShowcaseCategory(it) },
             onSelectAll = { viewModel.selectAllShowcaseCategories() },
             onUnselectAll = { viewModel.unselectAllShowcaseCategories() },
+            onApply = { viewModel.applyShowcaseCategories() },
             onApplyAndOpenBrowser = {
                 viewModel.applyShowcaseCategoriesAndOpenBrowser()
                 webViewRef?.reload()

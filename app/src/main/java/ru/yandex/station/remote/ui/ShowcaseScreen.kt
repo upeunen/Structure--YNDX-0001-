@@ -83,9 +83,15 @@ fun ShowcaseScreen(
     if (uiState.isShowcaseFilterOpen) {
         ShowcaseFilterDialog(
             enabledCategories = uiState.enabledShowcaseCategories,
+            customAddedCategories = uiState.customAddedCategories,
+            searchQuery = uiState.showcaseCategorySearchQuery,
+            onSearchQueryChange = { viewModel.setShowcaseCategorySearchQuery(it) },
+            onAddCategory = { viewModel.addCategoryFromCatalog(it) },
+            onRemoveCategory = { viewModel.removeCategoryFromCatalog(it) },
             onToggleCategory = { viewModel.toggleShowcaseCategory(it) },
             onSelectAll = { viewModel.selectAllShowcaseCategories() },
             onUnselectAll = { viewModel.unselectAllShowcaseCategories() },
+            onApply = { viewModel.applyShowcaseCategories() },
             onApplyAndOpenBrowser = { viewModel.applyShowcaseCategoriesAndOpenBrowser() },
             onDismiss = { viewModel.closeShowcaseFilter() }
         )
@@ -522,13 +528,19 @@ fun ShowcaseScreen(
     }
 }
 
-// Диалог выбора загружаемых разделов RuTracker
+// Диалог выбора загружаемых разделов RuTracker и добавления новых полок
 @Composable
 fun ShowcaseFilterDialog(
     enabledCategories: Set<String>,
+    customAddedCategories: Set<String> = emptySet(),
+    searchQuery: String = "",
+    onSearchQueryChange: (String) -> Unit = {},
+    onAddCategory: (String) -> Unit = {},
+    onRemoveCategory: (String) -> Unit = {},
     onToggleCategory: (String) -> Unit,
     onSelectAll: () -> Unit,
     onUnselectAll: () -> Unit,
+    onApply: () -> Unit = {},
     onApplyAndOpenBrowser: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -537,13 +549,13 @@ fun ShowcaseFilterDialog(
         title = {
             Column {
                 Text(
-                    text = "⚙️ Настройка полок RuTracker",
+                    text = "⚙️ Настройка полок Витрины",
                     fontWeight = FontWeight.Bold,
                     fontSize = 17.sp,
                     color = TextPrimary
                 )
                 Text(
-                    text = "Отметьте разделы для загрузки на Витрину:",
+                    text = "Выбирайте активные полки или находите новые:",
                     fontSize = 12.sp,
                     color = TextSecondary,
                     modifier = Modifier.padding(top = 4.dp)
@@ -555,61 +567,266 @@ fun ShowcaseFilterDialog(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Row(
+                // Поле быстрого поиска по всем разделам
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = onSearchQueryChange,
+                    placeholder = { Text("🔍 Найти полку (театр, спорт, космос...)", fontSize = 12.sp, color = TextSecondary) },
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    TextButton(onClick = onSelectAll) {
-                        Text("Выбрать все", fontSize = 11.sp, color = AccentYandex)
+                    shape = RoundedCornerShape(10.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AccentYandex,
+                        unfocusedBorderColor = DarkSurfaceElevated,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        cursorColor = AccentYandex
+                    ),
+                    trailingIcon = {
+                        if (searchQuery.isNotBlank()) {
+                            IconButton(onClick = { onSearchQueryChange("") }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Очистить", tint = TextSecondary, modifier = Modifier.size(16.dp))
+                            }
+                        }
                     }
-                    TextButton(onClick = onUnselectAll) {
-                        Text("Снять все", fontSize = 11.sp, color = TextSecondary)
-                    }
-                }
-                HorizontalDivider(color = DarkSurfaceElevated, modifier = Modifier.padding(bottom = 6.dp))
+                )
 
-                RuTrackerScraper.CATEGORIES.forEach { cat ->
-                    val isChecked = enabledCategories.contains(cat.id)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onToggleCategory(cat.id) }
-                            .padding(vertical = 4.dp, horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Checkbox(
-                            checked = isChecked,
-                            onCheckedChange = { onToggleCategory(cat.id) },
-                            colors = CheckboxDefaults.colors(
-                                checkedColor = AccentYandex,
-                                checkmarkColor = Color.Black,
-                                uncheckedColor = TextSecondary
+                if (searchQuery.isNotBlank()) {
+                    // Результаты поиска
+                    val filtered = RuTrackerScraper.CATEGORIES.filter {
+                        it.title.contains(searchQuery, ignoreCase = true)
+                    }
+
+                    if (filtered.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Ничего не найдено.\nПопробуйте: театр, космос, спорт, мульт, аниме, юмор",
+                                fontSize = 12.sp,
+                                color = TextSecondary,
+                                textAlign = TextAlign.Center
                             )
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        }
+                    } else {
                         Text(
-                            text = cat.title,
-                            fontSize = 13.sp,
-                            color = if (isChecked) TextPrimary else TextSecondary,
-                            fontWeight = if (isChecked) FontWeight.SemiBold else FontWeight.Normal
+                            text = "Результаты поиска (${filtered.size}):",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentYandex
                         )
+                        filtered.forEach { cat ->
+                            val isDefault = RuTrackerScraper.DEFAULT_CATEGORIES.any { it.id == cat.id }
+                            val isCustom = customAddedCategories.contains(cat.id)
+                            val isAdded = isDefault || isCustom
+                            val isChecked = enabledCategories.contains(cat.id)
+
+                            Surface(
+                                color = DarkSurfaceElevated,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        if (isAdded) {
+                                            Checkbox(
+                                                checked = isChecked,
+                                                onCheckedChange = { onToggleCategory(cat.id) },
+                                                colors = CheckboxDefaults.colors(
+                                                    checkedColor = AccentYandex,
+                                                    checkmarkColor = Color.Black,
+                                                    uncheckedColor = TextSecondary
+                                                )
+                                            )
+                                        } else {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                        }
+                                        Text(
+                                            text = cat.title,
+                                            fontSize = 13.sp,
+                                            color = if (isChecked) TextPrimary else TextSecondary,
+                                            fontWeight = if (isChecked) FontWeight.SemiBold else FontWeight.Normal
+                                        )
+                                    }
+
+                                    if (!isAdded) {
+                                        Button(
+                                            onClick = { onAddCategory(cat.id) },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = AccentYandex,
+                                                contentColor = Color.Black
+                                            ),
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            modifier = Modifier.height(32.dp)
+                                        ) {
+                                            Text("+ На витрину", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Обычный режим
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        TextButton(onClick = onSelectAll) {
+                            Text("Выбрать все", fontSize = 11.sp, color = AccentYandex)
+                        }
+                        TextButton(onClick = onUnselectAll) {
+                            Text("Снять все", fontSize = 11.sp, color = TextSecondary)
+                        }
+                    }
+
+                    // 1. Полки на витрине
+                    Text(
+                        text = "📺 АКТИВНЫЕ ПОЛКИ НА ВИТРИНЕ",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentYandex,
+                        letterSpacing = 1.sp
+                    )
+
+                    val activeList = RuTrackerScraper.DEFAULT_CATEGORIES + RuTrackerScraper.CATALOG_CATEGORIES.filter { customAddedCategories.contains(it.id) }
+                    activeList.forEach { cat ->
+                        val isChecked = enabledCategories.contains(cat.id)
+                        val isCustom = customAddedCategories.contains(cat.id)
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onToggleCategory(cat.id) }
+                                .padding(vertical = 2.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Checkbox(
+                                    checked = isChecked,
+                                    onCheckedChange = { onToggleCategory(cat.id) },
+                                    colors = CheckboxDefaults.colors(
+                                        checkedColor = AccentYandex,
+                                        checkmarkColor = Color.Black,
+                                        uncheckedColor = TextSecondary
+                                    )
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = cat.title,
+                                    fontSize = 13.sp,
+                                    color = if (isChecked) TextPrimary else TextSecondary,
+                                    fontWeight = if (isChecked) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                            }
+                            if (isCustom) {
+                                IconButton(
+                                    onClick = { onRemoveCategory(cat.id) },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DeleteOutline,
+                                        contentDescription = "Удалить полку",
+                                        tint = TextSecondary.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. Каталог доступных разделов
+                    val availableFromCatalog = RuTrackerScraper.CATALOG_CATEGORIES.filter { !customAddedCategories.contains(it.id) }
+                    if (availableFromCatalog.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        HorizontalDivider(color = DarkSurfaceElevated)
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Text(
+                            text = "✨ КАТАЛОГ НОВЫХ ПОЛОК (НА ВЫБОР)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentBlue,
+                            letterSpacing = 1.sp
+                        )
+
+                        availableFromCatalog.forEach { cat ->
+                            Surface(
+                                color = DarkSurfaceElevated,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = cat.title,
+                                        fontSize = 12.sp,
+                                        color = TextPrimary,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Button(
+                                        onClick = { onAddCategory(cat.id) },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = AccentYandex,
+                                            contentColor = Color.Black
+                                        ),
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(28.dp)
+                                    ) {
+                                        Text("+ Добавить", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         confirmButton = {
-            Button(
-                onClick = onApplyAndOpenBrowser,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AccentYandex,
-                    contentColor = Color.Black
-                ),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Text("Применить и в RuTracker", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = onApplyAndOpenBrowser,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("В RuTracker", fontSize = 11.sp)
+                }
+                Button(
+                    onClick = onApply,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AccentYandex,
+                        contentColor = Color.Black
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Применить", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
             }
         },
         dismissButton = {
@@ -990,7 +1207,7 @@ fun ShowcaseDetailsSheet(
                                 shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Column(modifier = Modifier.padding(10.dp)) {
+                                Column(modifier = Modifier.padding(12.dp)) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1000,22 +1217,27 @@ fun ShowcaseDetailsSheet(
                                             text = rev.author,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 12.sp,
-                                            color = AccentYandex
+                                            color = AccentYandex,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false)
                                         )
                                         if (rev.date.isNotBlank()) {
+                                            Spacer(modifier = Modifier.width(8.dp))
                                             Text(
                                                 text = rev.date,
                                                 fontSize = 10.sp,
-                                                color = TextSecondary
+                                                color = TextSecondary,
+                                                maxLines = 1
                                             )
                                         }
                                     }
-                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Spacer(modifier = Modifier.height(6.dp))
                                     Text(
                                         text = rev.text,
                                         fontSize = 12.sp,
                                         color = TextPrimary,
-                                        lineHeight = 16.sp
+                                        lineHeight = 17.sp
                                     )
                                 }
                             }

@@ -74,7 +74,7 @@ data class RemoteUiState(
     val torrServerLiveStats: TorrServerClient.ActiveTorrentStats? = null,
     val debugLogs: List<String> = emptyList(),
     // Витрина онлайн-кинотеатра и подборки
-    val movieSections: List<MovieSection> = MovieCatalogService.loadBuiltinSections(),
+    val movieSections: List<MovieSection> = emptyList(),
     val isMovieCatalogLoading: Boolean = false,
     val selectedCatalogMovie: MovieCatalogItem? = null,
     val movieReleases: List<TorrentRelease> = emptyList(),
@@ -84,7 +84,8 @@ data class RemoteUiState(
     val catalogSearchResults: List<MovieCatalogItem> = emptyList(),
     val isSearchingCatalog: Boolean = false,
     val isShowcaseFilterOpen: Boolean = false,
-    val enabledShowcaseCategories: Set<String> = emptySet()
+    val enabledShowcaseCategories: Set<String> = emptySet(),
+    val isRuTrackerCaptchaWaiting: Boolean = false
 )
 
 class RemoteViewModel(application: Application) : AndroidViewModel(application) {
@@ -1707,15 +1708,11 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
 
-            // 3. Базовые проверенные подборки
-            val baseSections = MovieCatalogService.loadMainSections()
-            val allSections = customSections + baseSections
-
             _uiState.value = _uiState.value.copy(
-                movieSections = allSections,
+                movieSections = customSections,
                 isMovieCatalogLoading = false
             )
-            addLog("Витрина: подборки обновлены (${allSections.size} категорий)")
+            addLog("Витрина: подборки обновлены (${customSections.size} категорий)")
 
             // Фоновая синхронизация с RuTracker при наличии сессии
             if (hasRuTrackerAuthCookies()) {
@@ -1740,6 +1737,13 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         if (userAgent.isNotBlank()) {
             prefs.rutrackerUserAgent = userAgent
         }
+        val wasCaptchaWaiting = _uiState.value.isRuTrackerCaptchaWaiting
+        if (wasCaptchaWaiting) {
+            _uiState.value = _uiState.value.copy(isRuTrackerCaptchaWaiting = false)
+            addLog("RuTracker: открыта страница трекера, капча пройдена. Возобновляем сбор подборок...")
+            syncRuTrackerCategoriesInBackground(force = true)
+            return
+        }
         val now = System.currentTimeMillis()
         if (hasRuTrackerAuthCookies(cookies) && (now - prefs.rutrackerLastSyncTimestamp > 20 * 60 * 1000L)) {
             syncRuTrackerCategoriesInBackground(force = false)
@@ -1753,41 +1757,52 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         val baseUrl = prefs.lastRutrackerUrl.ifBlank { RuTrackerScraper.DEFAULT_BASE_URL }
 
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            addLog("RuTracker: фоновый сбор подборок по сессии...")
+            addLog("RuTracker: фоновый сбор подборок (до 100 раздач на полку)...")
             var totalNew = 0
             val enabled = _uiState.value.enabledShowcaseCategories.ifEmpty { prefs.enabledRuTrackerCategories }
 
-            for (cat in RuTrackerScraper.CATEGORIES) {
-                if (!enabled.contains(cat.id)) continue
-                try {
-                    delay(1200) // Бережная пауза между запросами
-                    val items = RuTrackerScraper.fetchCategoryMovies(baseUrl, cookies, ua, cat, limit = 20)
-                    if (items.isNotEmpty()) {
-                        showcaseRepo.saveCategoryMovies(cat.id, items)
-                        totalNew += items.size
-                    }
-                } catch (e: Exception) {
-                    addLog("RuTracker: ошибка сбора ${cat.title}: ${e.message}")
-                }
-            }
-            prefs.rutrackerLastSyncTimestamp = System.currentTimeMillis()
-            if (totalNew > 0) {
-                addLog("RuTracker: витрина успешно обновлена ($totalNew раздач)")
-                // Обновляем витрину новыми данными
-                val updatedCustom = mutableListOf<MovieSection>()
-                val ruSaved = showcaseRepo.getRuTrackerMovies()
-                if (ruSaved.isNotEmpty()) {
-                    updatedCustom.add(MovieSection("rutracker_saved", "💎 Находки из RuTracker", ruSaved))
-                }
+            try {
                 for (cat in RuTrackerScraper.CATEGORIES) {
                     if (!enabled.contains(cat.id)) continue
-                    val catMovies = showcaseRepo.getCategoryMovies(cat.id)
-                    if (catMovies.isNotEmpty()) {
-                        updatedCustom.add(MovieSection(cat.id, cat.title, catMovies))
+                    try {
+                        delay(1000) // Бережная пауза между запросами к разделам
+                        val items = RuTrackerScraper.fetchCategoryMovies(baseUrl, cookies, ua, cat, limit = 100)
+                        if (items.isNotEmpty()) {
+                            showcaseRepo.saveCategoryMovies(cat.id, items)
+                            totalNew += items.size
+                        }
+                    } catch (e: RuTrackerCaptchaException) {
+                        throw e
+                    } catch (e: Exception) {
+                        addLog("RuTracker: ошибка сбора ${cat.title}: ${e.message}")
                     }
                 }
-                val base = MovieCatalogService.loadMainSections()
-                _uiState.value = _uiState.value.copy(movieSections = updatedCustom + base)
+                prefs.rutrackerLastSyncTimestamp = System.currentTimeMillis()
+                _uiState.value = _uiState.value.copy(isRuTrackerCaptchaWaiting = false)
+
+                if (totalNew > 0) {
+                    addLog("RuTracker: витрина успешно обновлена ($totalNew раздач)")
+                    // Обновляем витрину новыми данными
+                    val updatedCustom = mutableListOf<MovieSection>()
+                    val ruSaved = showcaseRepo.getRuTrackerMovies()
+                    if (ruSaved.isNotEmpty()) {
+                        updatedCustom.add(MovieSection("rutracker_saved", "💎 Находки из RuTracker", ruSaved))
+                    }
+                    for (cat in RuTrackerScraper.CATEGORIES) {
+                        if (!enabled.contains(cat.id)) continue
+                        val catMovies = showcaseRepo.getCategoryMovies(cat.id)
+                        if (catMovies.isNotEmpty()) {
+                            updatedCustom.add(MovieSection(cat.id, cat.title, catMovies))
+                        }
+                    }
+                    _uiState.value = _uiState.value.copy(movieSections = updatedCustom)
+                }
+            } catch (e: RuTrackerCaptchaException) {
+                addLog("RuTracker: требуется подтверждение/капча. Фоновый сбор приостановлен.")
+                _uiState.value = _uiState.value.copy(
+                    isRuTrackerCaptchaWaiting = true,
+                    isMovieCatalogLoading = false
+                )
             }
         }
     }

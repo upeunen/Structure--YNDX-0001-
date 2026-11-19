@@ -36,7 +36,7 @@ class ShowcaseRepository(context: Context) {
         val current = getRuTrackerMovies().toMutableList()
         current.removeAll { it.title.equals(movie.title, ignoreCase = true) || it.id == movie.id }
         current.add(0, movie)
-        if (current.size > 80) {
+        if (current.size > 100) {
             current.removeAt(current.size - 1)
         }
         saveCategoryMovies(KEY_RUTRACKER_SAVED, current)
@@ -60,7 +60,8 @@ class ShowcaseRepository(context: Context) {
                         backdropUrl = obj.optString("backdropUrl", ""),
                         releaseYear = obj.optString("releaseYear", ""),
                         rating = obj.optDouble("rating", 8.0),
-                        genre = obj.optString("genre", "RuTracker")
+                        genre = obj.optString("genre", "RuTracker"),
+                        seeds = obj.optInt("seeds", 0)
                     )
                 )
             }
@@ -76,7 +77,7 @@ class ShowcaseRepository(context: Context) {
     fun saveCategoryMovies(categoryId: String, movies: List<MovieCatalogItem>) {
         val key = if (categoryId == KEY_RUTRACKER_SAVED) KEY_RUTRACKER_SAVED else "$PREFIX_CATEGORY$categoryId"
         val arr = JSONArray()
-        for (m in movies.filter { isRealMovie(it) }.take(50)) {
+        for (m in movies.filter { isRealMovie(it) }.take(100)) {
             val obj = JSONObject().apply {
                 put("id", m.id)
                 put("title", m.title)
@@ -87,6 +88,7 @@ class ShowcaseRepository(context: Context) {
                 put("releaseYear", m.releaseYear)
                 put("rating", m.rating)
                 put("genre", m.genre)
+                put("seeds", m.seeds)
             }
             arr.put(obj)
         }

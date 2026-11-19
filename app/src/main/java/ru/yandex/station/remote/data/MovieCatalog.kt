@@ -16,7 +16,8 @@ data class MovieCatalogItem(
     val backdropUrl: String = "",
     val releaseYear: String,
     val rating: Double,
-    val genre: String = ""
+    val genre: String = "",
+    val seeds: Int = 0
 )
 
 data class MovieSection(
@@ -677,8 +678,8 @@ object MovieCatalogService {
     }
 
     suspend fun loadMainSections(): List<MovieSection> = withContext(Dispatchers.IO) {
-        // Мгновенный возврат проверенной базы с подтвержденными постерами
-        loadBuiltinSections()
+        // Витрина формируется исключительно из реальных раздач RuTracker
+        emptyList()
     }
 
     suspend fun searchMovies(query: String): List<MovieCatalogItem> = withContext(Dispatchers.IO) {

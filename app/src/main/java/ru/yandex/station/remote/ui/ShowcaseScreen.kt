@@ -103,6 +103,9 @@ fun ShowcaseScreen(
             onWatchLater = { viewModel.bookmarkCatalogMovie(movie, asLater = true) },
             onSelectRelease = { release ->
                 viewModel.playRelease(release, movie)
+            },
+            onPlayDirectTopic = {
+                viewModel.playRuTrackerTopic(movie.id, movie.title)
             }
         )
     }
@@ -223,6 +226,54 @@ fun ShowcaseScreen(
                     .padding(horizontal = 14.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // Баннер ожидания прохождения проверки/капчи RuTracker
+                if (uiState.isRuTrackerCaptchaWaiting) {
+                    item {
+                        Card(
+                            onClick = onOpenCollections,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF382305)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF9800)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "⚠️",
+                                    fontSize = 24.sp
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "RuTracker запросил проверку",
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFFFB74D),
+                                        fontSize = 13.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "Нажмите здесь, чтобы пройти капчу в браузере. После этого сбор раздач сразу продолжится.",
+                                        color = TextPrimary,
+                                        fontSize = 11.sp,
+                                        lineHeight = 15.sp
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Icon(
+                                    imageVector = Icons.Default.OpenInBrowser,
+                                    contentDescription = "Пройти капчу",
+                                    tint = Color(0xFFFFB74D),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Строка поиска по фильмам и сериалам
                 item {
                     OutlinedTextField(
@@ -576,7 +627,8 @@ fun ShowcaseDetailsSheet(
     onDismiss: () -> Unit,
     onBookmark: () -> Unit,
     onWatchLater: () -> Unit,
-    onSelectRelease: (TorrentRelease) -> Unit
+    onSelectRelease: (TorrentRelease) -> Unit,
+    onPlayDirectTopic: () -> Unit = {}
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -680,6 +732,28 @@ fun ShowcaseDetailsSheet(
                                 }
                             }
                         }
+
+                        if (movie.seeds > 0) {
+                            Surface(
+                                color = Color(0xFF1B431E),
+                                shape = RoundedCornerShape(6.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4CAF50).copy(alpha = 0.5f))
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text("⚡", fontSize = 10.sp)
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                    Text(
+                                        text = "${movie.seeds} сид.",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF69F0AE)
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     if (movie.genre.isNotBlank()) {
@@ -736,6 +810,32 @@ fun ShowcaseDetailsSheet(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Смотреть позже", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            // Прямой запуск раздачи с RuTracker на ТВ
+            if (movie.id > 100000) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = onPlayDirectTopic,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AccentYandex,
+                        contentColor = Color.Black
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "▶ Запустить раздачу с RuTracker на ТВ",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
                 }
             }
 
@@ -911,7 +1011,29 @@ fun MovieCard(
                         modifier = Modifier.fillMaxSize()
                     )
                 }
-                if (movie.rating > 0.0) {
+                // В правом верхнем углу: число сидов ⚡ (скорость и популярность) или рейтинг ⭐
+                if (movie.seeds > 0) {
+                    val isHot = movie.seeds >= 30
+                    Surface(
+                        color = if (isHot) Color(0xEE1B431E) else Color(0xDD18181A),
+                        shape = RoundedCornerShape(bottomStart = 8.dp),
+                        modifier = Modifier.align(Alignment.TopEnd)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text("⚡", fontSize = 10.sp)
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text(
+                                text = "${movie.seeds}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isHot) Color(0xFF69F0AE) else Color(0xFFFFD54F)
+                            )
+                        }
+                    }
+                } else if (movie.rating > 0.0) {
                     Surface(
                         color = Color.Black.copy(alpha = 0.75f),
                         shape = RoundedCornerShape(bottomStart = 8.dp),

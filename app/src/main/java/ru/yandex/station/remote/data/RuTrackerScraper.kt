@@ -12,6 +12,8 @@ data class RuTrackerCategory(
     val forumId: Int
 )
 
+class RuTrackerCaptchaException(message: String = "RuTracker запросил проверку капчи или подтверждение пользователя") : Exception(message)
+
 object RuTrackerScraper {
 
     const val DEFAULT_BASE_URL = "https://rutracker.org/forum"
@@ -68,26 +70,94 @@ object RuTrackerScraper {
         }
     }
 
+    fun isCaptchaOrBlocked(statusCode: Int, html: String): Boolean {
+        if (statusCode == 403 || statusCode == 503 || statusCode == 429) {
+            return true
+        }
+        val lower = html.lowercase()
+        return lower.contains("cf-turnstile") ||
+               lower.contains("cf-browser-verification") ||
+               lower.contains("challenge-running") ||
+               lower.contains("form-captcha") ||
+               lower.contains("captcha-form") ||
+               lower.contains("security check") ||
+               lower.contains("ddos-guard") ||
+               lower.contains("проверка безопасности") ||
+               lower.contains("подтвердите, что вы человек") ||
+               lower.contains("введите код") ||
+               lower.contains("cap_code") ||
+               lower.contains("just a moment...") ||
+               lower.contains("checking your browser") ||
+               lower.contains("attention required! | cloudflare") ||
+               lower.contains("cloudflare ray id")
+    }
+
+    fun extractRatingFromTopic(html: String): Double {
+        // 1. Поиск рейтинга Кинопоиска (приоритет)
+        val kpMatch = Regex("""(?:Кинопоиск|КиноПоиск|Kinopoisk|КП)\s*[:：\-]\s*(\d+[.,]\d+)""", RegexOption.IGNORE_CASE).find(html)
+        if (kpMatch != null) {
+            val score = kpMatch.groupValues[1].replace(',', '.').toDoubleOrNull()
+            if (score != null && score in 1.0..10.0) return score
+        }
+
+        // 2. Поиск рейтинга IMDb
+        val imdbMatch = Regex("""(?:IMDb|IMDB)\s*[:：\-]\s*(\d+[.,]\d+)""", RegexOption.IGNORE_CASE).find(html)
+        if (imdbMatch != null) {
+            val score = imdbMatch.groupValues[1].replace(',', '.').toDoubleOrNull()
+            if (score != null && score in 1.0..10.0) return score
+        }
+
+        // 3. Общий маркер оценки/рейтинга
+        val generalMatch = Regex("""(?:Рейтинг|Оценка)\s*[:：\-]\s*(\d+[.,]\d+)""", RegexOption.IGNORE_CASE).find(html)
+        if (generalMatch != null) {
+            val score = generalMatch.groupValues[1].replace(',', '.').toDoubleOrNull()
+            if (score != null && score in 1.0..10.0) return score
+        }
+
+        return 0.0
+    }
+
     suspend fun fetchCategoryMovies(
         baseUrl: String,
         cookies: String,
         userAgent: String,
         category: RuTrackerCategory,
-        limit: Int = 20
+        limit: Int = 100
     ): List<MovieCatalogItem> = withContext(Dispatchers.IO) {
         val cleanBase = getCleanBaseUrl(baseUrl)
-        // Сортировка по сидам: o=10 (seeds), s=2 (desc)
-        val trackerUrl = "$cleanBase/tracker.php?f=${category.forumId}&o=10&s=2"
-        val fallbackForumUrl = "$cleanBase/viewforum.php?f=${category.forumId}"
+        val allMovies = mutableListOf<MovieCatalogItem>()
 
-        var movies = queryHtml(trackerUrl, cleanBase, cookies, userAgent, category, limit)
-        if (movies.isEmpty()) {
-            movies = queryHtml(fallbackForumUrl, cleanBase, cookies, userAgent, category, limit)
+        // Страница 1 (start=0, до 50 раздач)
+        val trackerUrlPage1 = "$cleanBase/tracker.php?f=${category.forumId}&o=10&s=2&start=0"
+        val page1 = queryHtml(trackerUrlPage1, cleanBase, cookies, userAgent, category, 50)
+        allMovies.addAll(page1)
+
+        // Страница 2 (start=50, следующие 50 раздач — режим «листать-перелистать»)
+        if (page1.isNotEmpty() && limit > 50) {
+            try {
+                kotlinx.coroutines.delay(400)
+                val trackerUrlPage2 = "$cleanBase/tracker.php?f=${category.forumId}&o=10&s=2&start=50"
+                val page2 = queryHtml(trackerUrlPage2, cleanBase, cookies, userAgent, category, 50)
+                for (m in page2) {
+                    if (allMovies.none { it.id == m.id || it.title.equals(m.title, ignoreCase = true) }) {
+                        allMovies.add(m)
+                    }
+                }
+            } catch (e: RuTrackerCaptchaException) {
+                throw e
+            } catch (_: Exception) {}
         }
 
-        // Обогащаем раздачи реальными постерами и синопсисом прямо из страниц тем RuTracker
-        val enriched = movies.mapIndexed { idx, item ->
-            if (idx < 12 && item.posterUrl.isBlank()) {
+        // Резервный сбор через viewforum.php, если трекер недоступен
+        if (allMovies.isEmpty()) {
+            val fallbackForumUrl = "$cleanBase/viewforum.php?f=${category.forumId}"
+            val forumMovies = queryHtml(fallbackForumUrl, cleanBase, cookies, userAgent, category, limit)
+            allMovies.addAll(forumMovies)
+        }
+
+        // Обогащаем первые 20 раздач полными деталями (постеры, синопсис, реальный рейтинг КП/IMDb)
+        val enriched = allMovies.mapIndexed { idx, item ->
+            if (idx < 20 && (item.posterUrl.isBlank() || item.rating == 0.0)) {
                 enrichTopicDetails(cleanBase, cookies, userAgent, item)
             } else {
                 item
@@ -117,13 +187,25 @@ object RuTrackerScraper {
                 )
                 setRequestProperty("Referer", "$baseUrl/index.php")
             }
+
+            if (conn.responseCode == 403 || conn.responseCode == 503 || conn.responseCode == 429) {
+                conn.disconnect()
+                throw RuTrackerCaptchaException("RuTracker ответил статусом ${conn.responseCode} (требуется капча)")
+            }
+
             if (conn.responseCode in 200..299) {
                 val contentType = conn.contentType ?: ""
                 val charsetName = if (contentType.contains("utf-8", ignoreCase = true)) "UTF-8" else "windows-1251"
                 val html = conn.inputStream.bufferedReader(charset(charsetName)).readText()
                 conn.disconnect()
 
+                if (isCaptchaOrBlocked(conn.responseCode, html)) {
+                    throw RuTrackerCaptchaException("RuTracker запросил проверку пользователя на странице темы")
+                }
+
                 val (poster, overview) = extractPosterAndOverview(html)
+                val parsedRating = extractRatingFromTopic(html)
+
                 var finalPoster = poster
                 if (finalPoster.isBlank()) {
                     finalPoster = MovieCatalogService.findPoster(item.title, item.originalTitle)
@@ -132,15 +214,19 @@ object RuTrackerScraper {
                     finalPoster = MovieCatalogService.fetchOnlinePoster(item.title, item.originalTitle, item.releaseYear)
                 }
                 val finalOverview = if (overview.isNotBlank()) overview else item.overview
+                val finalRating = if (parsedRating > 0.0) parsedRating else (if (item.rating > 0.0) item.rating else 0.0)
 
                 item.copy(
                     posterUrl = finalPoster,
-                    overview = finalOverview
+                    overview = finalOverview,
+                    rating = finalRating
                 )
             } else {
                 conn.disconnect()
                 item
             }
+        } catch (e: RuTrackerCaptchaException) {
+            throw e
         } catch (_: Exception) {
             item
         }
@@ -234,6 +320,11 @@ object RuTrackerScraper {
                 setRequestProperty("Accept-Language", "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7")
             }
 
+            if (conn.responseCode == 403 || conn.responseCode == 503 || conn.responseCode == 429) {
+                conn.disconnect()
+                throw RuTrackerCaptchaException("RuTracker вернул код ${conn.responseCode} (требуется капча)")
+            }
+
             if (conn.responseCode !in 200..299) {
                 conn.disconnect()
                 return emptyList()
@@ -244,7 +335,13 @@ object RuTrackerScraper {
             val html = conn.inputStream.bufferedReader(charset(charsetName)).readText()
             conn.disconnect()
 
+            if (isCaptchaOrBlocked(conn.responseCode, html)) {
+                throw RuTrackerCaptchaException("RuTracker запросил проверку пользователя на странице списка")
+            }
+
             parseMoviesFromHtml(html, category, limit)
+        } catch (e: RuTrackerCaptchaException) {
+            throw e
         } catch (_: Exception) {
             emptyList()
         }
@@ -261,33 +358,83 @@ object RuTrackerScraper {
             "<a[^>]+href=[\"'](?:viewtopic\\.php\\?t=)?(\\d+)[\"'][^>]*class=[\"'][^\"']*tt-text[^\"']*[\"'][^>]*>(.*?)</a>",
             Pattern.CASE_INSENSITIVE
         )
-        val matcher = topicPattern.matcher(html)
 
-        while (matcher.find() && result.size < limit) {
-            val topicId = matcher.group(1)?.toLongOrNull() ?: continue
-            val rawHtmlTitle = matcher.group(2) ?: continue
-            val rawTitle = cleanHtmlEntities(rawHtmlTitle)
+        // Разбираем по строкам таблицы, чтобы точно сопоставить раздачу и количество её сидов
+        val rows = html.split(Regex("<tr[^>]*>", RegexOption.IGNORE_CASE))
+        if (rows.size > 2) {
+            for (row in rows) {
+                if (result.size >= limit) break
+                val matcher = topicPattern.matcher(row)
+                if (!matcher.find()) continue
+                val topicId = matcher.group(1)?.toLongOrNull() ?: continue
+                val rawHtmlTitle = matcher.group(2) ?: continue
+                val rawTitle = cleanHtmlEntities(rawHtmlTitle)
 
-            // СТРОГАЯ ФИЛЬТРАЦИЯ: пропускаем только реальные фильмы и сериалы!
-            if (!isValidMovieTopic(rawTitle)) continue
+                if (!isValidMovieTopic(rawTitle)) continue
 
-            val parsed = parseRuTrackerTitle(rawTitle)
+                var seeds = 0
+                val seedMatcher = Pattern.compile(
+                    """class=["'][^"']*seedmed[^"']*["'][^>]*>(?:<[^>]+>)*\s*(\d+)""",
+                    Pattern.CASE_INSENSITIVE
+                ).matcher(row)
+                if (seedMatcher.find()) {
+                    seeds = seedMatcher.group(1)?.toIntOrNull() ?: 0
+                } else {
+                    val altSeedMatcher = Pattern.compile(
+                        """(?:seedmed|seed)[^>]*>.*?(\d+)""",
+                        Pattern.CASE_INSENSITIVE
+                    ).matcher(row)
+                    if (altSeedMatcher.find()) {
+                        seeds = altSeedMatcher.group(1)?.toIntOrNull() ?: 0
+                    }
+                }
 
-            val existingPoster = MovieCatalogService.findPoster(parsed.title, parsed.originalTitle)
+                val parsed = parseRuTrackerTitle(rawTitle)
+                val existingPoster = MovieCatalogService.findPoster(parsed.title, parsed.originalTitle)
 
-            val item = MovieCatalogItem(
-                id = topicId,
-                title = parsed.title,
-                originalTitle = parsed.originalTitle,
-                overview = parsed.overview.ifBlank { "Раздача из раздела «${category.title}» на RuTracker" },
-                posterUrl = existingPoster,
-                releaseYear = parsed.year.ifBlank { "2024" },
-                rating = 8.4,
-                genre = parsed.genre.ifBlank { category.title.removePrefix("🎨 ").removePrefix("🔥 ").removePrefix("🏆 ").removePrefix("🍿 ") }
-            )
+                val item = MovieCatalogItem(
+                    id = topicId,
+                    title = parsed.title,
+                    originalTitle = parsed.originalTitle,
+                    overview = parsed.overview.ifBlank { "Раздача из раздела «${category.title}» на RuTracker" },
+                    posterUrl = existingPoster,
+                    releaseYear = parsed.year.ifBlank { "2024" },
+                    rating = 0.0,
+                    genre = parsed.genre.ifBlank { category.title.removePrefix("🎨 ").removePrefix("🔥 ").removePrefix("🏆 ").removePrefix("🍿 ") },
+                    seeds = seeds
+                )
 
-            if (result.none { it.id == item.id || it.title.equals(item.title, ignoreCase = true) }) {
-                result.add(item)
+                if (result.none { it.id == item.id || it.title.equals(item.title, ignoreCase = true) }) {
+                    result.add(item)
+                }
+            }
+        } else {
+            val matcher = topicPattern.matcher(html)
+            while (matcher.find() && result.size < limit) {
+                val topicId = matcher.group(1)?.toLongOrNull() ?: continue
+                val rawHtmlTitle = matcher.group(2) ?: continue
+                val rawTitle = cleanHtmlEntities(rawHtmlTitle)
+
+                if (!isValidMovieTopic(rawTitle)) continue
+
+                val parsed = parseRuTrackerTitle(rawTitle)
+                val existingPoster = MovieCatalogService.findPoster(parsed.title, parsed.originalTitle)
+
+                val item = MovieCatalogItem(
+                    id = topicId,
+                    title = parsed.title,
+                    originalTitle = parsed.originalTitle,
+                    overview = parsed.overview.ifBlank { "Раздача из раздела «${category.title}» на RuTracker" },
+                    posterUrl = existingPoster,
+                    releaseYear = parsed.year.ifBlank { "2024" },
+                    rating = 0.0,
+                    genre = parsed.genre.ifBlank { category.title.removePrefix("🎨 ").removePrefix("🔥 ").removePrefix("🏆 ").removePrefix("🍿 ") },
+                    seeds = 0
+                )
+
+                if (result.none { it.id == item.id || it.title.equals(item.title, ignoreCase = true) }) {
+                    result.add(item)
+                }
             }
         }
         return result

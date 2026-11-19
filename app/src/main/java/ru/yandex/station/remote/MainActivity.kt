@@ -27,6 +27,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import coil.Coil
+import coil.ImageLoader
+import okhttp3.OkHttpClient
 import ru.yandex.station.remote.ui.*
 
 class MainActivity : ComponentActivity() {
@@ -35,6 +38,34 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Настройка загрузчика изображений с поддержкой фотохостингов RuTracker
+        try {
+            val okHttpClient = OkHttpClient.Builder()
+                .addInterceptor { chain ->
+                    val original = chain.request()
+                    val urlStr = original.url.toString()
+                    val builder = original.newBuilder()
+                    if (urlStr.contains("fastpic", ignoreCase = true) ||
+                        urlStr.contains("imageban", ignoreCase = true) ||
+                        urlStr.contains("rutracker", ignoreCase = true) ||
+                        urlStr.contains("lostpic", ignoreCase = true) ||
+                        urlStr.contains("radikal", ignoreCase = true) ||
+                        urlStr.contains("vfl.ru", ignoreCase = true)
+                    ) {
+                        builder.header("Referer", "https://rutracker.org/")
+                        builder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    }
+                    chain.proceed(builder.build())
+                }
+                .build()
+
+            val imageLoader = ImageLoader.Builder(this)
+                .okHttpClient(okHttpClient)
+                .crossfade(true)
+                .build()
+            Coil.setImageLoader(imageLoader)
+        } catch (_: Exception) {}
 
         handleShareIntent(intent)
 

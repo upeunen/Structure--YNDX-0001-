@@ -366,36 +366,50 @@ fun CollectionsScreen(
                                             })(a);
                                         }
 
-                                        // Тихий сбор данных раздачи в каталог находок
+                                        // Тихий сбор данных раздачи в каталог находок с жесткой фильтрацией служебного мусора
                                         try {
+                                            var stopWords = ['правила', 'faq', 'инструкц', 'навигатор', 'объявлен', 'внимани', 'обсужден', 'опрос', 'каталог', 'модератор', 'оформлен', 'флудилк', 'курилк', 'заявк', 'шаблон', 'архив'];
                                             if (window.location.href.indexOf('viewtopic.php') !== -1) {
                                                 var titleEl = document.querySelector('#topic-title, .maintitle, h1');
                                                 var rawTitle = titleEl ? titleEl.textContent.trim() : document.title;
-                                                var firstPost = document.querySelector('.post_body, .message');
-                                                var posterImg = firstPost ? firstPost.querySelector('var.postImg, img.postImg, img') : null;
-                                                var pUrl = '';
-                                                if (posterImg) {
-                                                    pUrl = posterImg.getAttribute('title') || posterImg.src || '';
-                                                }
-                                                var descText = firstPost ? firstPost.innerText.substring(0, 450).trim() : '';
-                                                var ym = rawTitle.match(/\b(19\d\d|20\d\d)\b/);
-                                                var y = ym ? ym[1] : '';
-                                                var tm = window.location.href.match(/[?&]t=(\d+)/);
-                                                var tid = tm ? tm[1] : '';
-                                                if (window.PultBridge && window.PultBridge.saveTopicToCatalog && tid && rawTitle) {
-                                                    window.PultBridge.saveTopicToCatalog(tid, rawTitle, pUrl, descText, y, 'RuTracker');
+                                                var lowerRaw = rawTitle.toLowerCase();
+                                                var isJunkTopic = stopWords.some(function(w) { return lowerRaw.indexOf(w) !== -1; });
+                                                var hasYearTopic = /\b(19\d\d|20\d\d)\b/.test(rawTitle);
+                                                if (!isJunkTopic && (hasYearTopic || rawTitle.indexOf('/') !== -1)) {
+                                                    var firstPost = document.querySelector('.post_body, .message');
+                                                    var posterImg = firstPost ? firstPost.querySelector('var.postImg, img.postImg, img') : null;
+                                                    var pUrl = '';
+                                                    if (posterImg) {
+                                                        pUrl = posterImg.getAttribute('title') || posterImg.src || '';
+                                                        if (pUrl.indexOf('//') === 0) pUrl = 'https:' + pUrl;
+                                                        else if (pUrl.indexOf('http://') === 0) pUrl = pUrl.replace('http://', 'https://');
+                                                    }
+                                                    var descText = firstPost ? firstPost.innerText.substring(0, 450).trim() : '';
+                                                    var ym = rawTitle.match(/\b(19\d\d|20\d\d)\b/);
+                                                    var y = ym ? ym[1] : '';
+                                                    var tm = window.location.href.match(/[?&]t=(\d+)/);
+                                                    var tid = tm ? tm[1] : '';
+                                                    if (window.PultBridge && window.PultBridge.saveTopicToCatalog && tid) {
+                                                        window.PultBridge.saveTopicToCatalog(tid, rawTitle, pUrl, descText, y, 'RuTracker');
+                                                    }
                                                 }
                                             } else if (window.location.href.indexOf('tracker.php') !== -1 || window.location.href.indexOf('viewforum.php') !== -1) {
-                                                // Сбор тем со страницы поиска / списка раздач форума
+                                                // Сбор тем со страницы поиска / списка раздач форума (только реальные фильмы/сериалы)
                                                 var topicLinks = document.querySelectorAll('a.tt-text, a[href*="viewtopic.php?t="]');
-                                                for (var j = 0; j < Math.min(topicLinks.length, 12); j++) {
+                                                for (var j = 0; j < Math.min(topicLinks.length, 25); j++) {
                                                     var tl = topicLinks[j];
+                                                    var title2 = tl.textContent ? tl.textContent.trim() : '';
+                                                    var lowerTitle = title2.toLowerCase();
+                                                    var isJunk = stopWords.some(function(w) { return lowerTitle.indexOf(w) !== -1; });
+                                                    var hasYear = /\b(19\d\d|20\d\d)\b/.test(title2);
+                                                    var hasSlash = title2.indexOf('/') !== -1;
+                                                    if (isJunk || (!hasYear && !hasSlash)) continue;
+
                                                     var href = tl.getAttribute('href') || '';
                                                     var tm2 = href.match(/[?&]t=(\d+)/);
-                                                    if (tm2 && tl.textContent) {
+                                                    if (tm2 && title2) {
                                                         var tid2 = tm2[1];
-                                                        var title2 = tl.textContent.trim();
-                                                        if (window.PultBridge && window.PultBridge.saveTopicToCatalog && tid2 && title2) {
+                                                        if (window.PultBridge && window.PultBridge.saveTopicToCatalog) {
                                                             window.PultBridge.saveTopicToCatalog(tid2, title2, '', '', '', 'RuTracker');
                                                         }
                                                     }

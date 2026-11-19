@@ -14,11 +14,25 @@ class ShowcaseRepository(context: Context) {
         private const val PREFIX_CATEGORY = "showcase_cat_"
     }
 
+    private val STOP_WORDS = listOf(
+        "правила", "правило", "faq", "инструкц", "навигатор", "объявлен", "внимани",
+        "обсужден", "опрос", "каталог", "модератор", "оформлен", "флудилк", "курилк",
+        "заявк", "шаблон", "архив", "помощь", "как скачивать", "список раздач", "поздравлен"
+    )
+
+    fun isRealMovie(movie: MovieCatalogItem): Boolean {
+        val fullText = (movie.title + " " + movie.originalTitle + " " + movie.overview).lowercase()
+        if (STOP_WORDS.any { fullText.contains(it) }) return false
+        val hasYear = Regex("""\b(19\d\d|20\d\d)\b""").find(movie.title + " " + movie.releaseYear + " " + movie.overview) != null
+        return hasYear || movie.originalTitle.isNotBlank()
+    }
+
     fun getRuTrackerMovies(): List<MovieCatalogItem> {
         return getCategoryMovies(KEY_RUTRACKER_SAVED)
     }
 
     fun addRuTrackerMovie(movie: MovieCatalogItem) {
+        if (!isRealMovie(movie)) return
         val current = getRuTrackerMovies().toMutableList()
         current.removeAll { it.title.equals(movie.title, ignoreCase = true) || it.id == movie.id }
         current.add(0, movie)
@@ -51,13 +65,18 @@ class ShowcaseRepository(context: Context) {
                 )
             }
         } catch (_: Exception) {}
-        return list
+
+        val filtered = list.filter { isRealMovie(it) }
+        if (filtered.size != list.size) {
+            saveCategoryMovies(categoryId, filtered)
+        }
+        return filtered
     }
 
     fun saveCategoryMovies(categoryId: String, movies: List<MovieCatalogItem>) {
         val key = if (categoryId == KEY_RUTRACKER_SAVED) KEY_RUTRACKER_SAVED else "$PREFIX_CATEGORY$categoryId"
         val arr = JSONArray()
-        for (m in movies.take(50)) {
+        for (m in movies.filter { isRealMovie(it) }.take(50)) {
             val obj = JSONObject().apply {
                 put("id", m.id)
                 put("title", m.title)

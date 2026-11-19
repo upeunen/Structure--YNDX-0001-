@@ -1807,10 +1807,10 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         year: String,
         category: String
     ) {
-        if (rawTitle.isBlank()) return
+        if (rawTitle.isBlank() || !RuTrackerScraper.isValidMovieTopic(rawTitle)) return
         val parsed = RuTrackerScraper.parseRuTrackerTitle(rawTitle)
         val cleanTitle = parsed.title.ifBlank { rawTitle.take(50) }
-        val poster = if (posterUrl.isNotBlank()) posterUrl else MovieCatalogService.findPoster(cleanTitle, parsed.originalTitle)
+        var poster = if (posterUrl.isNotBlank()) posterUrl else MovieCatalogService.findPoster(cleanTitle, parsed.originalTitle)
 
         val movie = MovieCatalogItem(
             id = topicId.toLongOrNull() ?: System.currentTimeMillis(),
@@ -1824,7 +1824,18 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         )
         showcaseRepo.addRuTrackerMovie(movie)
         loadMovieCatalog()
-        addLog("RuTracker: в витрину добавлена находка «$cleanTitle»")
+        addLog("RuTracker: в витрину добавлен фильм «$cleanTitle»")
+
+        // Если постера нет, пробуем подтянуть его в фоне через открытый кино-сервер
+        if (poster.isBlank()) {
+            viewModelScope.launch {
+                val onlinePoster = MovieCatalogService.fetchOnlinePoster(cleanTitle, parsed.originalTitle, movie.releaseYear)
+                if (onlinePoster.isNotBlank()) {
+                    showcaseRepo.addRuTrackerMovie(movie.copy(posterUrl = onlinePoster))
+                    loadMovieCatalog()
+                }
+            }
+        }
     }
 
     fun bookmarkCatalogMovie(movie: MovieCatalogItem, asLater: Boolean = false) {

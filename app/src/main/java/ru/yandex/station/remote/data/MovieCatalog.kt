@@ -646,6 +646,36 @@ object MovieCatalogService {
         return found?.posterUrl ?: ""
     }
 
+    suspend fun fetchOnlinePoster(title: String, originalTitle: String = "", year: String = ""): String = withContext(Dispatchers.IO) {
+        val local = findPoster(title, originalTitle)
+        if (local.isNotBlank()) return@withContext local
+
+        val query = originalTitle.ifBlank { title }.trim()
+        if (query.isBlank()) return@withContext ""
+        try {
+            val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+            val u = URL("https://api.tvmaze.com/singlesearch/shows?q=$encoded")
+            val conn = (u.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 3500
+                readTimeout = 4000
+            }
+            if (conn.responseCode in 200..299) {
+                val jsonStr = conn.inputStream.bufferedReader().readText()
+                conn.disconnect()
+                val json = JSONObject(jsonStr)
+                val imgObj = json.optJSONObject("image")
+                val poster = imgObj?.optString("medium", "") ?: ""
+                if (poster.isNotBlank()) {
+                    return@withContext if (poster.startsWith("http://")) poster.replaceFirst("http://", "https://") else poster
+                }
+            } else {
+                conn.disconnect()
+            }
+        } catch (_: Exception) {}
+        ""
+    }
+
     suspend fun loadMainSections(): List<MovieSection> = withContext(Dispatchers.IO) {
         // Мгновенный возврат проверенной базы с подтвержденными постерами
         loadBuiltinSections()

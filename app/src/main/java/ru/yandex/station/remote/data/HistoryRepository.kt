@@ -97,6 +97,14 @@ class HistoryRepository(context: Context) {
         return getFavorites().any { it.id == movieId }
     }
 
+    fun addToFavorites(movie: MovieItem) {
+        val current = getFavorites().toMutableList()
+        current.removeAll { it.id == movie.id || (it.magnetUrl.isNotBlank() && it.magnetUrl == movie.magnetUrl) }
+        current.add(0, movie.copy(isFavorite = true, category = "Закладки"))
+        if (current.size > 100) current.removeAt(current.size - 1)
+        saveList(KEY_FAVORITES, current)
+    }
+
     fun removeFromFavorites(movieId: String) {
         val current = getFavorites().toMutableList()
         current.removeAll { it.id == movieId }

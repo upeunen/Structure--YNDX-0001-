@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -57,10 +58,9 @@ class MainActivity : ComponentActivity() {
                             containerColor = DarkSurface,
                             contentColor = AccentYandex
                         ) {
-                            // 1. Кинозал (главный экран)
+                            // 1. Кинозал (свои фильмы, закладки, плеер)
                             NavigationBarItem(
-                                selected = uiState.activeAppScreen == AppScreen.CINEMA ||
-                                    uiState.activeAppScreen == AppScreen.COLLECTIONS,
+                                selected = uiState.activeAppScreen == AppScreen.CINEMA,
                                 onClick = { viewModel.setAppScreen(AppScreen.CINEMA) },
                                 icon = {
                                     Icon(
@@ -78,7 +78,27 @@ class MainActivity : ComponentActivity() {
                                 )
                             )
 
-                            // 2. Алиса (быстрый возврат к часам в 1 касание)
+                            // 2. Витрина (новинки, подборки, находки)
+                            NavigationBarItem(
+                                selected = uiState.activeAppScreen == AppScreen.SHOWCASE,
+                                onClick = { viewModel.setAppScreen(AppScreen.SHOWCASE) },
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Default.VideoLibrary,
+                                        contentDescription = "Витрина"
+                                    )
+                                },
+                                label = { Text("Витрина") },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = AccentYandex,
+                                    unselectedIconColor = TextSecondary,
+                                    selectedTextColor = AccentYandex,
+                                    unselectedTextColor = TextSecondary,
+                                    indicatorColor = DarkSurfaceElevated
+                                )
+                            )
+
+                            // 3. Алиса (быстрый возврат к часам в 1 касание)
                             NavigationBarItem(
                                 selected = false,
                                 onClick = { viewModel.launchAlice() },
@@ -99,7 +119,7 @@ class MainActivity : ComponentActivity() {
                                 )
                             )
 
-                            // 3. YouTube
+                            // 4. YouTube
                             NavigationBarItem(
                                 selected = uiState.activeAppScreen == AppScreen.YOUTUBE,
                                 onClick = { viewModel.setAppScreen(AppScreen.YOUTUBE) },
@@ -129,6 +149,13 @@ class MainActivity : ComponentActivity() {
                         when (uiState.activeAppScreen) {
                             AppScreen.CINEMA -> {
                                 CinemaScreen(
+                                    viewModel = viewModel,
+                                    onOpenSettings = { showSettings = true },
+                                    onOpenCollections = { viewModel.setAppScreen(AppScreen.COLLECTIONS) }
+                                )
+                            }
+                            AppScreen.SHOWCASE -> {
+                                ShowcaseScreen(
                                     viewModel = viewModel,
                                     onOpenSettings = { showSettings = true },
                                     onOpenCollections = { viewModel.setAppScreen(AppScreen.COLLECTIONS) }

@@ -226,6 +226,11 @@ fun CollectionsScreen(
                                 fun bookmark(url: String, title: String) {
                                     viewModel.addToWatchLaterFromBrowser(url, title)
                                 }
+
+                                @android.webkit.JavascriptInterface
+                                fun saveTopicToCatalog(topicId: String, title: String, posterUrl: String, overview: String, year: String, category: String) {
+                                    viewModel.saveRuTrackerTopicToShowcase(topicId, title, posterUrl, overview, year, category)
+                                }
                             },
                             "PultBridge"
                         )
@@ -358,6 +363,28 @@ fun CollectionsScreen(
                                                 });
                                             })(a);
                                         }
+
+                                        // Тихий сбор данных раздачи в каталог находок
+                                        try {
+                                            if (window.location.href.indexOf('viewtopic.php') !== -1) {
+                                                var titleEl = document.querySelector('#topic-title, .maintitle, h1');
+                                                var rawTitle = titleEl ? titleEl.textContent.trim() : document.title;
+                                                var firstPost = document.querySelector('.post_body, .message');
+                                                var posterImg = firstPost ? firstPost.querySelector('var.postImg, img.postImg, img') : null;
+                                                var pUrl = '';
+                                                if (posterImg) {
+                                                    pUrl = posterImg.getAttribute('title') || posterImg.src || '';
+                                                }
+                                                var descText = firstPost ? firstPost.innerText.substring(0, 450).trim() : '';
+                                                var ym = rawTitle.match(/\b(19\d\d|20\d\d)\b/);
+                                                var y = ym ? ym[1] : '';
+                                                var tm = window.location.href.match(/[?&]t=(\d+)/);
+                                                var tid = tm ? tm[1] : '';
+                                                if (window.PultBridge && window.PultBridge.saveTopicToCatalog && tid && rawTitle) {
+                                                    window.PultBridge.saveTopicToCatalog(tid, rawTitle, pUrl, descText, y, 'RuTracker');
+                                                }
+                                            }
+                                        } catch (e) {}
                                     })();
                                 """.trimIndent()
                                 view?.evaluateJavascript(js, null)

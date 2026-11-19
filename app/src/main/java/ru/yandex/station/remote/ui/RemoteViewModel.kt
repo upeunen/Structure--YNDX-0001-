@@ -30,6 +30,7 @@ enum class StationConnectionStatus {
 
 enum class AppScreen {
     CINEMA,
+    SHOWCASE,
     COLLECTIONS,
     YOUTUBE
 }
@@ -87,6 +88,7 @@ data class RemoteUiState(
 class RemoteViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = RemotePreferences(application)
     private val historyRepo = HistoryRepository(application)
+    private val showcaseRepo = ShowcaseRepository(application)
     private val youtubeHistoryRepo = YouTubeHistoryRepository(application)
 
     private val _uiState = MutableStateFlow(
@@ -275,7 +277,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     fun setAppScreen(screen: AppScreen) {
         vibrate(20)
         _uiState.value = _uiState.value.copy(activeAppScreen = screen)
-        if (screen == AppScreen.CINEMA) {
+        if (screen == AppScreen.CINEMA || screen == AppScreen.SHOWCASE) {
             viewModelScope.launch {
                 ensureTorrServerRunning(notifyIfStarted = true)
             }
@@ -1641,13 +1643,80 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         if (_uiState.value.isMovieCatalogLoading) return
         _uiState.value = _uiState.value.copy(isMovieCatalogLoading = true)
         viewModelScope.launch {
-            val sections = MovieCatalogService.loadMainSections()
+            val baseSections = MovieCatalogService.loadMainSections()
+            val ruMovies = showcaseRepo.getRuTrackerMovies()
+            val allSections = if (ruMovies.isNotEmpty()) {
+                listOf(MovieSection("rutracker_saved", "💎 Находки из RuTracker", ruMovies)) + baseSections
+            } else {
+                baseSections
+            }
             _uiState.value = _uiState.value.copy(
-                movieSections = sections,
+                movieSections = allSections,
                 isMovieCatalogLoading = false
             )
-            addLog("Кинозал: подборки обновлены (${sections.size} категорий)")
+            addLog("Витрина: подборки обновлены (${allSections.size} категорий)")
         }
+    }
+
+    fun saveRuTrackerTopicToShowcase(
+        topicId: String,
+        rawTitle: String,
+        posterUrl: String,
+        overview: String,
+        year: String,
+        category: String
+    ) {
+        if (rawTitle.isBlank()) return
+        val cleanTitle = rawTitle
+            .substringBefore(" [")
+            .substringBefore(" (")
+            .substringBefore(" /")
+            .trim()
+            .ifBlank { rawTitle.take(60) }
+
+        val movie = MovieCatalogItem(
+            id = topicId.toLongOrNull() ?: System.currentTimeMillis(),
+            title = cleanTitle,
+            originalTitle = "",
+            overview = overview.trim().take(500),
+            posterUrl = posterUrl.trim(),
+            releaseYear = year.trim().ifBlank { "2024" },
+            rating = 8.5,
+            genre = category.ifBlank { "RuTracker" }
+        )
+        showcaseRepo.addRuTrackerMovie(movie)
+        loadMovieCatalog()
+        addLog("RuTracker: в витрину добавлена находка «$cleanTitle»")
+    }
+
+    fun bookmarkCatalogMovie(movie: MovieCatalogItem, asLater: Boolean = false) {
+        vibrate(30)
+        val item = MovieItem(
+            id = "catalog_" + movie.id,
+            title = movie.title,
+            year = movie.releaseYear,
+            quality = "HD",
+            size = "",
+            seeds = 10,
+            category = if (asLater) "Смотреть позже" else "Закладки",
+            magnetUrl = "",
+            description = movie.overview,
+            posterUrl = movie.posterUrl
+        )
+        if (asLater) {
+            historyRepo.addToWatchLater(item)
+            showMessage("«${movie.title}» добавлено в «Смотреть позже»")
+        } else {
+            historyRepo.addToFavorites(item)
+            showMessage("«${movie.title}» добавлено в закладки Кинозала")
+        }
+        _uiState.value = _uiState.value.copy(
+            cinemaMovies = when (_uiState.value.selectedCinemaCategory) {
+                "⭐ Закладки" -> historyRepo.getFavorites()
+                "📌 Смотреть позже" -> historyRepo.getWatchLater()
+                else -> historyRepo.getHistory()
+            }
+        )
     }
 
     fun generateRandomSelection() {
@@ -1657,7 +1726,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.value = _uiState.value.copy(
             movieSections = listOf(randomSec) + existing
         )
-        addLog("Кинозал: сгенерирована случайная подборка (${randomSec.movies.size} фильмов)")
+        addLog("Витрина: сгенерирована случайная подборка (${randomSec.movies.size} фильмов)")
     }
 
     fun selectMovieForReleases(movie: MovieCatalogItem) {

@@ -12,7 +12,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -25,15 +24,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
-import ru.yandex.station.remote.data.MovieCatalogItem
 import ru.yandex.station.remote.data.MovieItem
-import ru.yandex.station.remote.data.TorrentRelease
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -86,20 +82,6 @@ fun CinemaScreen(
             },
             containerColor = DarkSurface,
             shape = RoundedCornerShape(16.dp)
-        )
-    }
-
-    // Шторка выбора раздачи для выбранного фильма из каталога
-    uiState.selectedCatalogMovie?.let { selectedMovie ->
-        ReleasesSheet(
-            movie = selectedMovie,
-            releases = uiState.movieReleases,
-            isLoading = uiState.isLoadingReleases,
-            errorMessage = uiState.releasesError,
-            onDismiss = { viewModel.dismissMovieReleases() },
-            onSelectRelease = { release ->
-                viewModel.playRelease(release, selectedMovie)
-            }
         )
     }
 
@@ -183,19 +165,10 @@ fun CinemaScreen(
                 },
                 actions = {
                     IconButton(
-                        onClick = { viewModel.generateRandomSelection() }
+                        onClick = { viewModel.cleanStationMemory() },
+                        enabled = !uiState.isCleaningMemory
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Shuffle,
-                            contentDescription = "Случайная подборка",
-                            tint = AccentYandex
-                        )
-                    }
-                    IconButton(
-                        onClick = { viewModel.loadMovieCatalog() },
-                        enabled = !uiState.isMovieCatalogLoading
-                    ) {
-                        if (uiState.isMovieCatalogLoading) {
+                        if (uiState.isCleaningMemory) {
                             CircularProgressIndicator(
                                 color = AccentYandex,
                                 strokeWidth = 2.dp,
@@ -203,8 +176,8 @@ fun CinemaScreen(
                             )
                         } else {
                             Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Обновить подборки",
+                                imageVector = Icons.Default.CleaningServices,
+                                contentDescription = "Очистить память Станции",
                                 tint = TextSecondary
                             )
                         }
@@ -255,69 +228,51 @@ fun CinemaScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 14.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
 
-                // Поисковая строка фильмов и раздач
+                // Кнопки быстрой вставки Magnet и выбора .torrent файла
                 item {
-                    OutlinedTextField(
-                        value = uiState.catalogSearchQuery,
-                        onValueChange = {
-                            viewModel.setCatalogSearchQuery(it)
-                            if (it.length >= 3) {
-                                viewModel.searchCatalog(it)
-                            }
-                        },
-                        placeholder = {
-                            Text("Поиск фильмов, новинок, сериалов...", color = TextSecondary, fontSize = 14.sp)
-                        },
-                        trailingIcon = {
-                            if (uiState.isSearchingCatalog) {
-                                CircularProgressIndicator(
-                                    color = AccentYandex,
-                                    strokeWidth = 2.dp,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            } else {
-                                IconButton(onClick = { viewModel.searchCatalog(uiState.catalogSearchQuery) }) {
-                                    Icon(Icons.Default.Search, contentDescription = "Поиск", tint = AccentYandex)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                val clip = clipboard.primaryClip
+                                if (clip != null && clip.itemCount > 0) {
+                                    val text = clip.getItemAt(0).text?.toString() ?: ""
+                                    if (text.startsWith("magnet:?")) {
+                                        viewModel.playMagnetUrl(text)
+                                    } else {
+                                        viewModel.showMessage("В буфере нет magnet-ссылки")
+                                    }
+                                } else {
+                                    viewModel.showMessage("Буфер обмена пуст")
                                 }
-                            }
-                        },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentYandex,
-                            unfocusedBorderColor = DarkSurfaceElevated,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
-                            cursorColor = AccentYandex
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-
-                // Результаты поиска по каталогу (если идет поиск)
-                if (uiState.catalogSearchQuery.isNotBlank() && uiState.catalogSearchResults.isNotEmpty()) {
-                    item {
-                        Text(
-                            text = "🔍 НАЙДЕНО В КАТАЛОГЕ",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = AccentYandex,
-                            letterSpacing = 1.sp
-                        )
-                    }
-                    item {
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+                            modifier = Modifier.weight(1f)
                         ) {
-                            items(uiState.catalogSearchResults) { movie ->
-                                MovieCard(
-                                    movie = movie,
-                                    onClick = { viewModel.selectMovieForReleases(movie) }
-                                )
-                            }
+                            Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Вставить Magnet", fontSize = 12.sp)
+                        }
+
+                        Button(
+                            onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = DarkSurfaceElevated,
+                                contentColor = TextPrimary
+                            ),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.FileOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(".torrent файл", fontSize = 12.sp)
                         }
                     }
                 }
@@ -365,7 +320,8 @@ fun CinemaScreen(
                                     color = StatusGreen,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
-                                    maxLines = 1
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
                                     text = "Пиры: ${stats.activePeers}/${stats.totalPeers} • Скорость: $speedText • Буфер: $bufMb",
@@ -377,95 +333,7 @@ fun CinemaScreen(
                     }
                 }
 
-                // Карусели витрины онлайн-кинотеатра
-                if (uiState.isMovieCatalogLoading && uiState.movieSections.isEmpty()) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(220.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                CircularProgressIndicator(color = AccentYandex, modifier = Modifier.size(36.dp))
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text("Загрузка подборок кино...", color = TextSecondary, fontSize = 13.sp)
-                            }
-                        }
-                    }
-                } else {
-                    items(uiState.movieSections) { section ->
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Text(
-                                text = section.title,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
-                            )
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                contentPadding = PaddingValues(bottom = 4.dp)
-                            ) {
-                                items(section.movies) { movie ->
-                                    MovieCard(
-                                        movie = movie,
-                                        onClick = { viewModel.selectMovieForReleases(movie) }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Кнопки быстрой вставки Magnet и выбора .torrent файла
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clip = clipboard.primaryClip
-                                if (clip != null && clip.itemCount > 0) {
-                                    val text = clip.getItemAt(0).text?.toString() ?: ""
-                                    if (text.startsWith("magnet:?")) {
-                                        viewModel.playMagnetUrl(text)
-                                    } else {
-                                        viewModel.setCatalogSearchQuery(text)
-                                        viewModel.searchCatalog(text)
-                                    }
-                                }
-                            },
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Вставить Magnet", fontSize = 12.sp)
-                        }
-
-                        Button(
-                            onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = DarkSurfaceElevated,
-                                contentColor = TextPrimary
-                            ),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.FileOpen, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(".torrent файл", fontSize = 12.sp)
-                        }
-                    }
-                }
-
-                // История просмотров и Закладки
+                // Переключатели: История просмотров, Закладки, Смотреть позже
                 item {
                     val categories = listOf("🕒 История", "⭐ Закладки", "📌 Смотреть позже")
                     val scrollState = rememberScrollState()
@@ -501,24 +369,84 @@ fun CinemaScreen(
                     }
                 }
 
-                // Список сохраненных фильмов
-                if (uiState.cinemaMovies.isEmpty()) {
+                // Поисковая строка по своим фильмам (если в списке есть фильмы)
+                if (uiState.cinemaMovies.isNotEmpty() || uiState.cinemaSearchQuery.isNotEmpty()) {
+                    item {
+                        OutlinedTextField(
+                            value = uiState.cinemaSearchQuery,
+                            onValueChange = { viewModel.setCinemaSearchQuery(it) },
+                            placeholder = {
+                                Text("Поиск в разделе «${uiState.selectedCinemaCategory}»...", color = TextSecondary, fontSize = 12.sp)
+                            },
+                            trailingIcon = {
+                                if (uiState.cinemaSearchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { viewModel.setCinemaSearchQuery("") }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Очистить", tint = TextSecondary, modifier = Modifier.size(18.dp))
+                                    }
+                                } else {
+                                    Icon(Icons.Default.Search, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+                                }
+                            },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = AccentYandex,
+                                unfocusedBorderColor = DarkSurfaceElevated,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
+                                cursorColor = AccentYandex
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                        )
+                    }
+                }
+
+                // Фильтрованный список сохраненных фильмов
+                val filteredMovies = if (uiState.cinemaSearchQuery.isBlank()) {
+                    uiState.cinemaMovies
+                } else {
+                    uiState.cinemaMovies.filter {
+                        it.title.contains(uiState.cinemaSearchQuery, ignoreCase = true) ||
+                        it.description.contains(uiState.cinemaSearchQuery, ignoreCase = true)
+                    }
+                }
+
+                if (filteredMovies.isEmpty()) {
                     item {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 16.dp),
+                                .padding(vertical = 36.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = "Список «${uiState.selectedCinemaCategory}» пуст",
-                                color = TextSecondary,
-                                fontSize = 13.sp
-                            )
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = Icons.Default.Movie,
+                                    contentDescription = null,
+                                    tint = TextSecondary.copy(alpha = 0.4f),
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = if (uiState.cinemaSearchQuery.isNotBlank()) "Ничего не найдено по запросу" else "Список «${uiState.selectedCinemaCategory}» пуст",
+                                    color = TextSecondary,
+                                    fontSize = 13.sp
+                                )
+                                if (uiState.cinemaSearchQuery.isBlank()) {
+                                    Text(
+                                        text = "Сохраняйте находки из RuTracker и Витрины",
+                                        color = TextSecondary.copy(alpha = 0.7f),
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.padding(top = 4.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 } else {
-                    items(uiState.cinemaMovies) { movie ->
+                    items(filteredMovies) { movie ->
                         CinemaMovieCard(
                             movie = movie,
                             onPlay = { viewModel.playMovieOnStation(movie) },
@@ -529,11 +457,11 @@ fun CinemaScreen(
 
                 // Отступ снизу для панели плеера
                 item {
-                    Spacer(modifier = Modifier.height(70.dp))
+                    Spacer(modifier = Modifier.height(72.dp))
                 }
             }
 
-            // Тонкая компактная полоска плеера в одну строку во время воспроизведения
+            // Тонкая компактная полоска плеера внизу экрана во время воспроизведения
             val activeCinemaTitle = uiState.activeMoviePlaying?.title ?: uiState.torrServerLiveStats?.title
             if (activeCinemaTitle != null) {
                 Surface(
@@ -564,6 +492,7 @@ fun CinemaScreen(
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
                         )
                         IconButton(
@@ -572,7 +501,7 @@ fun CinemaScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Close,
-                                contentDescription = "Закрыть и очистить память",
+                                contentDescription = "Остановить и очистить память",
                                 tint = AccentRed,
                                 modifier = Modifier.size(20.dp)
                             )
@@ -584,244 +513,7 @@ fun CinemaScreen(
     }
 }
 
-// Карточка фильма в витрине онлайн-кинотеатра
-@Composable
-fun MovieCard(
-    movie: MovieCatalogItem,
-    onClick: () -> Unit
-) {
-    Card(
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        modifier = Modifier
-            .width(130.dp)
-            .clickable(onClick = onClick)
-    ) {
-        Column {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(185.dp)
-                    .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
-                    .background(DarkSurfaceElevated),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Movie,
-                    contentDescription = null,
-                    tint = TextSecondary.copy(alpha = 0.35f),
-                    modifier = Modifier.size(40.dp)
-                )
-                if (movie.posterUrl.isNotBlank()) {
-                    AsyncImage(
-                        model = movie.posterUrl,
-                        contentDescription = movie.title,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                if (movie.rating > 0.0) {
-                    Surface(
-                        color = Color.Black.copy(alpha = 0.75f),
-                        shape = RoundedCornerShape(bottomStart = 8.dp),
-                        modifier = Modifier.align(Alignment.TopEnd)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text("⭐", fontSize = 10.sp)
-                            Spacer(modifier = Modifier.width(2.dp))
-                            Text(
-                                text = "%.1f".format(movie.rating),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = AccentYandex
-                            )
-                        }
-                    }
-                }
-            }
-            Column(modifier = Modifier.padding(8.dp)) {
-                Text(
-                    text = movie.title,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary,
-                    maxLines = 2,
-                    lineHeight = 15.sp
-                )
-                if (movie.releaseYear.isNotBlank()) {
-                    Text(
-                        text = movie.releaseYear,
-                        fontSize = 11.sp,
-                        color = TextSecondary,
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
-                }
-            }
-        }
-    }
-}
-
-// Шторка со списком раздач для выбранного фильма
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ReleasesSheet(
-    movie: MovieCatalogItem,
-    releases: List<TorrentRelease>,
-    isLoading: Boolean,
-    errorMessage: String?,
-    onDismiss: () -> Unit,
-    onSelectRelease: (TorrentRelease) -> Unit
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = DarkSurface,
-        dragHandle = { BottomSheetDefaults.DragHandle(color = TextSecondary) }
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 24.dp)
-        ) {
-            // Заголовок фильма
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                AsyncImage(
-                    model = movie.posterUrl,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(width = 54.dp, height = 80.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = movie.title,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-                    if (movie.releaseYear.isNotBlank() || movie.rating > 0.0) {
-                        Text(
-                            text = "${movie.releaseYear} • ⭐ ${movie.rating}",
-                            fontSize = 12.sp,
-                            color = AccentYandex
-                        )
-                    }
-                    Text(
-                        text = "Выберите раздачу для воспроизведения в VLC:",
-                        fontSize = 11.sp,
-                        color = TextSecondary,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
-            }
-
-            HorizontalDivider(color = DarkSurfaceElevated, modifier = Modifier.padding(bottom = 8.dp))
-
-            if (isLoading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(180.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = AccentYandex, modifier = Modifier.size(36.dp))
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "Поиск лучших раздач на трекерах...",
-                            fontSize = 13.sp,
-                            color = TextSecondary
-                        )
-                    }
-                }
-            } else if (!errorMessage.isNullOrBlank()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(120.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = errorMessage,
-                        fontSize = 14.sp,
-                        color = TextSecondary
-                    )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 440.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(releases) { release ->
-                        Card(
-                            onClick = { onSelectRelease(release) },
-                            shape = RoundedCornerShape(10.dp),
-                            colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Surface(
-                                        color = if (release.seeds > 0) Color(0xFF1E3A1E) else Color(0xFF2A2A2A),
-                                        shape = RoundedCornerShape(6.dp)
-                                    ) {
-                                        Text(
-                                            text = "⚡ ${release.seeds} сид.",
-                                            color = if (release.seeds > 0) Color(0xFF4CAF50) else TextSecondary,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                    if (release.size.isNotBlank()) {
-                                        Surface(
-                                            color = Color.Black.copy(alpha = 0.5f),
-                                            shape = RoundedCornerShape(6.dp)
-                                        ) {
-                                            Text(
-                                                text = release.size,
-                                                color = TextPrimary,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = release.title,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = TextPrimary,
-                                    lineHeight = 16.sp
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// Карточка фильма в истории просмотров / закладках
+// Карточка фильма в истории просмотров / закладках Кинозала
 @Composable
 fun CinemaMovieCard(
     movie: MovieItem,
@@ -844,6 +536,8 @@ fun CinemaMovieCard(
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
                 IconButton(
@@ -865,6 +559,7 @@ fun CinemaMovieCard(
                     fontSize = 12.sp,
                     color = TextSecondary,
                     maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 4.dp)
                 )
             }
@@ -887,6 +582,19 @@ fun CinemaMovieCard(
                         ) {
                             Text(
                                 text = movie.size,
+                                fontSize = 10.sp,
+                                color = TextSecondary,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    if (movie.year.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = DarkSurfaceElevated
+                        ) {
+                            Text(
+                                text = movie.year,
                                 fontSize = 10.sp,
                                 color = TextSecondary,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)

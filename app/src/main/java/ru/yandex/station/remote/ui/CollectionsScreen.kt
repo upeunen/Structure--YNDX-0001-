@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -125,6 +126,23 @@ fun CollectionsScreen(
         }
     }
 
+    val uiState by viewModel.uiState.collectAsState()
+
+    // Диалог выбора загружаемых разделов RuTracker
+    if (uiState.isShowcaseFilterOpen) {
+        ShowcaseFilterDialog(
+            enabledCategories = uiState.enabledShowcaseCategories,
+            onToggleCategory = { viewModel.toggleShowcaseCategory(it) },
+            onSelectAll = { viewModel.selectAllShowcaseCategories() },
+            onUnselectAll = { viewModel.unselectAllShowcaseCategories() },
+            onApplyAndOpenBrowser = {
+                viewModel.applyShowcaseCategoriesAndOpenBrowser()
+                webViewRef?.reload()
+            },
+            onDismiss = { viewModel.closeShowcaseFilter() }
+        )
+    }
+
     Scaffold(
         containerColor = OledBlack,
         topBar = {
@@ -164,6 +182,13 @@ fun CollectionsScreen(
                         }
                     },
                     actions = {
+                        IconButton(onClick = { viewModel.openShowcaseFilter() }) {
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = "Настройка полок",
+                                tint = AccentYandex
+                            )
+                        }
                         IconButton(onClick = {
                             viewModel.saveLastRutrackerUrl(RUTRACKER_COLLECTIONS_URL)
                             webViewRef?.loadUrl(RUTRACKER_COLLECTIONS_URL)

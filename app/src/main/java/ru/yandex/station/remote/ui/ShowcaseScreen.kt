@@ -21,12 +21,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import ru.yandex.station.remote.data.MovieCatalogItem
 import ru.yandex.station.remote.data.MovieSection
+import ru.yandex.station.remote.data.RuTrackerScraper
 import ru.yandex.station.remote.data.TorrentRelease
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -37,6 +39,57 @@ fun ShowcaseScreen(
     onOpenSettings: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    var showClearConfirm by remember { mutableStateOf(false) }
+
+    // Диалог подтверждения полной очистки витрины
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = {
+                Text(
+                    text = "Очистка витрины",
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+            },
+            text = {
+                Text(
+                    text = "Полностью очистить витрину? Все текущие подборки и раздачи будут удалены до следующего обновления.",
+                    color = TextSecondary,
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearConfirm = false
+                        viewModel.clearEntireShowcase()
+                    }
+                ) {
+                    Text("Очистить всё", color = AccentRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) {
+                    Text("Отмена", color = TextPrimary)
+                }
+            },
+            containerColor = DarkSurface,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    // Диалог выбора загружаемых разделов RuTracker
+    if (uiState.isShowcaseFilterOpen) {
+        ShowcaseFilterDialog(
+            enabledCategories = uiState.enabledShowcaseCategories,
+            onToggleCategory = { viewModel.toggleShowcaseCategory(it) },
+            onSelectAll = { viewModel.selectAllShowcaseCategories() },
+            onUnselectAll = { viewModel.unselectAllShowcaseCategories() },
+            onApplyAndOpenBrowser = { viewModel.applyShowcaseCategoriesAndOpenBrowser() },
+            onDismiss = { viewModel.closeShowcaseFilter() }
+        )
+    }
 
     // Просторная шторка подробностей выбранного фильма
     uiState.selectedCatalogMovie?.let { movie ->
@@ -74,6 +127,27 @@ fun ShowcaseScreen(
                     }
                 },
                 actions = {
+                    // Кнопка очистки витрины
+                    IconButton(
+                        onClick = { showClearConfirm = true }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteOutline,
+                            contentDescription = "Очистить витрину",
+                            tint = TextSecondary
+                        )
+                    }
+                    // Кнопка настройки загружаемых полок
+                    IconButton(
+                        onClick = { viewModel.openShowcaseFilter() }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Tune,
+                            contentDescription = "Настройка полок",
+                            tint = AccentYandex
+                        )
+                    }
+                    // Случайная подборка
                     IconButton(
                         onClick = { viewModel.generateRandomSelection() }
                     ) {
@@ -83,6 +157,7 @@ fun ShowcaseScreen(
                             tint = AccentYandex
                         )
                     }
+                    // Обновление подборок
                     IconButton(
                         onClick = { viewModel.loadMovieCatalog(forceRefreshRuTracker = true) },
                         enabled = !uiState.isMovieCatalogLoading
@@ -101,6 +176,7 @@ fun ShowcaseScreen(
                             )
                         }
                     }
+                    // Переход в RuTracker
                     FilledTonalButton(
                         onClick = onOpenCollections,
                         colors = ButtonDefaults.filledTonalButtonColors(
@@ -108,19 +184,19 @@ fun ShowcaseScreen(
                             contentColor = TextPrimary
                         ),
                         shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                        modifier = Modifier.padding(end = 4.dp)
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(end = 2.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.VideoLibrary,
                             contentDescription = null,
-                            modifier = Modifier.size(15.dp),
+                            modifier = Modifier.size(14.dp),
                             tint = AccentYandex
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Spacer(modifier = Modifier.width(3.dp))
                         Text(
                             text = "RuTracker",
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -192,7 +268,7 @@ fun ShowcaseScreen(
                     )
                 }
 
-                // Результаты поиска по каталогу (если пользователь что-то ищет)
+                // Результаты поиска по каталогу
                 if (uiState.catalogSearchQuery.isNotBlank() && uiState.catalogSearchResults.isNotEmpty()) {
                     item {
                         Text(
@@ -230,6 +306,66 @@ fun ShowcaseScreen(
                                 CircularProgressIndicator(color = AccentYandex, modifier = Modifier.size(36.dp))
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Text("Загрузка подборок витрины...", color = TextSecondary, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                } else if (uiState.movieSections.isEmpty()) {
+                    // Пустое состояние (после очистки)
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 48.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(horizontal = 24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.VideoLibrary,
+                                    contentDescription = null,
+                                    tint = TextSecondary.copy(alpha = 0.4f),
+                                    modifier = Modifier.size(54.dp)
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = "Витрина пуста",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Настройте разделы RuTracker или нажмите «Обновить» для загрузки свежих подборок",
+                                    fontSize = 12.sp,
+                                    color = TextSecondary,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Button(
+                                        onClick = { viewModel.openShowcaseFilter() },
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = AccentYandex,
+                                            contentColor = Color.Black
+                                        )
+                                    ) {
+                                        Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Настроить полки", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    }
+                                    OutlinedButton(
+                                        onClick = { viewModel.loadMovieCatalog(forceRefreshRuTracker = true) },
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary)
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Загрузить", fontSize = 12.sp)
+                                    }
+                                }
                             }
                         }
                     }
@@ -327,6 +463,106 @@ fun ShowcaseScreen(
             }
         }
     }
+}
+
+// Диалог выбора загружаемых разделов RuTracker
+@Composable
+fun ShowcaseFilterDialog(
+    enabledCategories: Set<String>,
+    onToggleCategory: (String) -> Unit,
+    onSelectAll: () -> Unit,
+    onUnselectAll: () -> Unit,
+    onApplyAndOpenBrowser: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text(
+                    text = "⚙️ Настройка полок RuTracker",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp,
+                    color = TextPrimary
+                )
+                Text(
+                    text = "Отметьте разделы для загрузки на Витрину:",
+                    fontSize = 12.sp,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    TextButton(onClick = onSelectAll) {
+                        Text("Выбрать все", fontSize = 11.sp, color = AccentYandex)
+                    }
+                    TextButton(onClick = onUnselectAll) {
+                        Text("Снять все", fontSize = 11.sp, color = TextSecondary)
+                    }
+                }
+                HorizontalDivider(color = DarkSurfaceElevated, modifier = Modifier.padding(bottom = 6.dp))
+
+                RuTrackerScraper.CATEGORIES.forEach { cat ->
+                    val isChecked = enabledCategories.contains(cat.id)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onToggleCategory(cat.id) }
+                            .padding(vertical = 4.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = isChecked,
+                            onCheckedChange = { onToggleCategory(cat.id) },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = AccentYandex,
+                                checkmarkColor = Color.Black,
+                                uncheckedColor = TextSecondary
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = cat.title,
+                            fontSize = 13.sp,
+                            color = if (isChecked) TextPrimary else TextSecondary,
+                            fontWeight = if (isChecked) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onApplyAndOpenBrowser,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AccentYandex,
+                    contentColor = Color.Black
+                ),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text("Применить и в RuTracker", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена", color = TextSecondary)
+            }
+        },
+        containerColor = DarkSurface,
+        shape = RoundedCornerShape(16.dp)
+    )
 }
 
 // Просторная шторка с подробной информацией о фильме и раздачами
@@ -638,7 +874,6 @@ fun ShowcaseDetailsSheet(
         }
     }
 }
-
 
 // Карточка фильма в каруселях витрины
 @Composable

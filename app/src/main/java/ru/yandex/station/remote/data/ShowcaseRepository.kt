@@ -96,4 +96,13 @@ class ShowcaseRepository(context: Context) {
     fun clearRuTrackerMovies() {
         prefs.edit().remove(KEY_RUTRACKER_SAVED).apply()
     }
+
+    fun clearAllShowcase() {
+        val editor = prefs.edit()
+        editor.remove(KEY_RUTRACKER_SAVED)
+        for (cat in RuTrackerScraper.CATEGORIES) {
+            editor.remove("$PREFIX_CATEGORY${cat.id}")
+        }
+        editor.apply()
+    }
 }

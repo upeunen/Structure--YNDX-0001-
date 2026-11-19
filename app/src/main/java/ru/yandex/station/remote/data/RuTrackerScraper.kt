@@ -18,9 +18,13 @@ object RuTrackerScraper {
 
     val CATEGORIES = listOf(
         RuTrackerCategory("rutracker_arthouse", "🎨 Авторское и редкое кино", 124),
-        RuTrackerCategory("rutracker_hot_movies", "🔥 Горячие новинки RuTracker", 7),
+        RuTrackerCategory("rutracker_hot_movies", "🔥 Новинки кино", 7),
+        RuTrackerCategory("rutracker_uhd_4k", "📽️ Фильмы в 4K UHD", 930),
         RuTrackerCategory("rutracker_classics", "🏆 Классика мирового кино", 22),
-        RuTrackerCategory("rutracker_series", "🍿 Зарубежные сериалы", 189)
+        RuTrackerCategory("rutracker_series", "🍿 Зарубежные сериалы", 189),
+        RuTrackerCategory("rutracker_ru_series", "📺 Русские сериалы", 2100),
+        RuTrackerCategory("rutracker_cartoons", "🧸 Мультфильмы", 208),
+        RuTrackerCategory("rutracker_doc", "📚 Документальное кино", 1460)
     )
 
     private val STOP_WORDS = listOf(

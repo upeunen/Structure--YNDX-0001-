@@ -16,6 +16,7 @@ class RemotePreferences(context: Context) {
         private const val KEY_RUTRACKER_COOKIES = "rutracker_cookies"
         private const val KEY_RUTRACKER_USER_AGENT = "rutracker_ua"
         private const val KEY_RUTRACKER_LAST_SYNC = "rutracker_last_sync"
+        private const val KEY_ENABLED_CATEGORIES = "rutracker_enabled_categories"
 
         const val DEFAULT_IP = "192.168.100.6"
         const val DEFAULT_PORT = 5555
@@ -52,4 +53,11 @@ class RemotePreferences(context: Context) {
     var rutrackerLastSyncTimestamp: Long
         get() = prefs.getLong(KEY_RUTRACKER_LAST_SYNC, 0L)
         set(value) = prefs.edit().putLong(KEY_RUTRACKER_LAST_SYNC, value).apply()
+
+    var enabledRuTrackerCategories: Set<String>
+        get() {
+            val defaultSet = RuTrackerScraper.CATEGORIES.map { it.id }.toSet()
+            return prefs.getStringSet(KEY_ENABLED_CATEGORIES, null) ?: defaultSet
+        }
+        set(value) = prefs.edit().putStringSet(KEY_ENABLED_CATEGORIES, value).apply()
 }

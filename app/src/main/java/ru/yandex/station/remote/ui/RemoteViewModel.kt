@@ -82,7 +82,9 @@ data class RemoteUiState(
     val releasesError: String? = null,
     val catalogSearchQuery: String = "",
     val catalogSearchResults: List<MovieCatalogItem> = emptyList(),
-    val isSearchingCatalog: Boolean = false
+    val isSearchingCatalog: Boolean = false,
+    val isShowcaseFilterOpen: Boolean = false,
+    val enabledShowcaseCategories: Set<String> = emptySet()
 )
 
 class RemoteViewModel(application: Application) : AndroidViewModel(application) {
@@ -98,7 +100,8 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             rutrackerLogin = prefs.rutrackerLogin,
             rutrackerPass = prefs.rutrackerPassword,
             youtubeHistory = youtubeHistoryRepo.getHistory(),
-            cinemaMovies = historyRepo.getHistory()
+            cinemaMovies = historyRepo.getHistory(),
+            enabledShowcaseCategories = prefs.enabledRuTrackerCategories
         )
     )
     val uiState: StateFlow<RemoteUiState> = _uiState.asStateFlow()
@@ -1639,6 +1642,49 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
     // === Управление онлайн-витриной и раздачами ===
 
+    fun openShowcaseFilter() {
+        _uiState.value = _uiState.value.copy(isShowcaseFilterOpen = true)
+    }
+
+    fun closeShowcaseFilter() {
+        _uiState.value = _uiState.value.copy(isShowcaseFilterOpen = false)
+    }
+
+    fun toggleShowcaseCategory(categoryId: String) {
+        val current = _uiState.value.enabledShowcaseCategories.toMutableSet()
+        if (current.contains(categoryId)) {
+            current.remove(categoryId)
+        } else {
+            current.add(categoryId)
+        }
+        _uiState.value = _uiState.value.copy(enabledShowcaseCategories = current)
+    }
+
+    fun selectAllShowcaseCategories() {
+        val all = RuTrackerScraper.CATEGORIES.map { it.id }.toSet()
+        _uiState.value = _uiState.value.copy(enabledShowcaseCategories = all)
+    }
+
+    fun unselectAllShowcaseCategories() {
+        _uiState.value = _uiState.value.copy(enabledShowcaseCategories = emptySet())
+    }
+
+    fun applyShowcaseCategoriesAndOpenBrowser() {
+        prefs.enabledRuTrackerCategories = _uiState.value.enabledShowcaseCategories
+        closeShowcaseFilter()
+        loadMovieCatalog(forceRefreshRuTracker = false)
+        setAppScreen(AppScreen.COLLECTIONS)
+        showMessage("Разделы сохранены. Пройдите проверку на RuTracker")
+    }
+
+    fun clearEntireShowcase() {
+        vibrate(30)
+        showcaseRepo.clearAllShowcase()
+        _uiState.value = _uiState.value.copy(movieSections = emptyList())
+        showMessage("Витрина полностью очищена")
+        addLog("Витрина: пользователь полностью очистил все подборки")
+    }
+
     fun loadMovieCatalog(forceRefreshRuTracker: Boolean = false) {
         if (_uiState.value.isMovieCatalogLoading) return
         _uiState.value = _uiState.value.copy(isMovieCatalogLoading = true)
@@ -1651,8 +1697,10 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 customSections.add(MovieSection("rutracker_saved", "💎 Находки из RuTracker", ruSaved))
             }
 
-            // 2. Распарсенные разделы RuTracker по сессии (Авторское кино, Новинки, Классика, Сериалы)
+            // 2. Распарсенные разделы RuTracker по сессии (только включенные галочками)
+            val enabled = _uiState.value.enabledShowcaseCategories.ifEmpty { prefs.enabledRuTrackerCategories }
             for (cat in RuTrackerScraper.CATEGORIES) {
+                if (!enabled.contains(cat.id)) continue
                 val catMovies = showcaseRepo.getCategoryMovies(cat.id)
                 if (catMovies.isNotEmpty()) {
                     customSections.add(MovieSection(cat.id, cat.title, catMovies))
@@ -1707,7 +1755,10 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             addLog("RuTracker: фоновый сбор подборок по сессии...")
             var totalNew = 0
+            val enabled = _uiState.value.enabledShowcaseCategories.ifEmpty { prefs.enabledRuTrackerCategories }
+
             for (cat in RuTrackerScraper.CATEGORIES) {
+                if (!enabled.contains(cat.id)) continue
                 try {
                     delay(1200) // Бережная пауза между запросами
                     val items = RuTrackerScraper.fetchCategoryMovies(baseUrl, cookies, ua, cat, limit = 20)
@@ -1729,6 +1780,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                     updatedCustom.add(MovieSection("rutracker_saved", "💎 Находки из RuTracker", ruSaved))
                 }
                 for (cat in RuTrackerScraper.CATEGORIES) {
+                    if (!enabled.contains(cat.id)) continue
                     val catMovies = showcaseRepo.getCategoryMovies(cat.id)
                     if (catMovies.isNotEmpty()) {
                         updatedCustom.add(MovieSection(cat.id, cat.title, catMovies))

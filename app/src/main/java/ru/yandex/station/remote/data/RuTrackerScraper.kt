@@ -222,6 +222,8 @@ object RuTrackerScraper {
 
                 val topicData = extractTopicData(html)
                 val parsedRating = extractRatingFromTopic(html)
+                val topicSeeds = extractSeedsFromTopic(html)
+                val topicSize = extractSizeFromTopic(html)
 
                 var finalPoster = topicData.posterUrl
                 if (finalPoster.isBlank()) {
@@ -240,11 +242,15 @@ object RuTrackerScraper {
                 }
 
                 val finalRating = if (parsedRating > 0.0) parsedRating else (if (item.rating > 0.0) item.rating else 0.0)
+                val finalSeeds = if (topicSeeds > 0) topicSeeds else item.seeds
+                val finalSize = if (topicSize.isNotBlank()) topicSize else item.torrentSize
 
                 item.copy(
                     posterUrl = finalPoster,
                     overview = finalOverview,
                     rating = finalRating,
+                    seeds = finalSeeds,
+                    torrentSize = finalSize,
                     director = topicData.director.ifBlank { item.director },
                     country = topicData.country.ifBlank { item.country },
                     cast = topicData.cast.ifBlank { item.cast },
@@ -259,6 +265,18 @@ object RuTrackerScraper {
         } catch (_: Exception) {
             item
         }
+    }
+
+    fun extractSeedsFromTopic(html: String): Int {
+        val seedMatch = Regex("""(?:Сиды|Сидов|Seeders|Seeds)\s*[:：&nbsp;]*\s*(?:<[^>]+>)*\s*(\d+)""", RegexOption.IGNORE_CASE).find(html)
+            ?: Regex("""class=["'][^"']*seed(?:med)?[^"']*["'][^>]*>(?:<[^>]+>)*\s*(\d+)""", RegexOption.IGNORE_CASE).find(html)
+        return seedMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
+    }
+
+    fun extractSizeFromTopic(html: String): String {
+        val sizeMatch = Regex("""(?:Размер|Размер файла|Размер раздачи|Size)\s*[:：&nbsp;]*\s*(?:<[^>]+>)*\s*([\d.,]+\s*(?:GB|ГБ|MB|МБ|TB|ТБ))""", RegexOption.IGNORE_CASE).find(html)
+            ?: Regex("""class=["'][^"']*(?:tr-dl|tor-size)[^"']*["'][^>]*>(?:<[^>]+>)*\s*([\d.,]+\s*(?:GB|ГБ|MB|МБ|TB|ТБ))""", RegexOption.IGNORE_CASE).find(html)
+        return sizeMatch?.groupValues?.get(1)?.trim() ?: ""
     }
 
     data class ParsedTopicData(
@@ -316,20 +334,51 @@ object RuTrackerScraper {
             posterUrl = posterUrl.replaceFirst("http://", "https://")
         }
 
-        // 2. Полный связный сюжет (захватываем все абзацы сюжета)
+        // 2. Полный связный сюжет (независимо от тегов b, span, br)
         var overview = ""
-        val fullOverviewPattern = Pattern.compile(
-            """(?:Описание|О фильме|Сюжет|Синопсис)\s*:\s*(?:</b>)?(.*?)(?:(?:<br\s*/?>\s*)*<b\b[^>]*>\s*(?:Качество|Формат|Видео|Аудио|Файл|Субтитры|Релиз|Перевод|Доп|Техданные)|<div class=["']sp-wrap|<hr|</div>\s*<div|\z)""",
-            Pattern.CASE_INSENSITIVE or Pattern.DOTALL
-        )
-        val mFullOver = fullOverviewPattern.matcher(html)
-        if (mFullOver.find()) {
-            val raw = mFullOver.group(1) ?: ""
-            val clean = cleanHtmlEntities(raw)
-                .replace(Regex("""\n\s*\n+"""), "\n\n")
-                .trim()
-            if (clean.length > 20) {
-                overview = clean.take(1500)
+        val startKeywords = listOf("описание", "сюжет", "о фильме", "синопсис")
+        val lowerHtml = html.lowercase()
+        var bestStartIdx = -1
+
+        for (kw in startKeywords) {
+            val idx = lowerHtml.indexOf(kw)
+            if (idx != -1) {
+                val after = html.substring(idx + kw.length, (idx + kw.length + 60).coerceAtMost(html.length))
+                if (after.contains(":") || after.contains("：") || after.contains("</b>") || after.contains("</span>") || after.contains("</strong>")) {
+                    bestStartIdx = idx + kw.length
+                    break
+                }
+            }
+        }
+
+        if (bestStartIdx != -1) {
+            var cur = bestStartIdx
+            while (cur < html.length && (html[cur] == ':' || html[cur] == '：' || html[cur] == '-' || html[cur] == ' ' || html[cur] == '<' || html[cur] == '>' || html[cur] == '/' || html[cur] == '\n' || html[cur] == '\r')) {
+                if (html[cur] == '<') {
+                    val closeTag = html.indexOf('>', cur)
+                    if (closeTag != -1) cur = closeTag + 1 else cur++
+                } else {
+                    cur++
+                }
+            }
+
+            val stopKeywords = listOf("качество", "формат", "видео", "аудио", "субтитры", "звук", "продолжительность", "время", "релиз", "перевод", "доп. информация", "скриншоты", "sp-wrap", "<hr")
+            var endIdx = (cur + 1600).coerceAtMost(html.length)
+            for (skw in stopKeywords) {
+                val found = lowerHtml.indexOf(skw, cur)
+                if (found in cur until endIdx) {
+                    endIdx = found
+                }
+            }
+
+            if (endIdx > cur) {
+                val candidate = html.substring(cur, endIdx)
+                val cleaned = cleanHtmlEntities(candidate)
+                    .replace(Regex("""\n\s*\n+"""), "\n\n")
+                    .trim()
+                if (cleaned.length >= 20) {
+                    overview = cleaned.take(1500)
+                }
             }
         }
 
@@ -434,45 +483,71 @@ object RuTrackerScraper {
 
     fun parseReviewsFromHtml(html: String): List<MovieReview> {
         val reviews = mutableListOf<MovieReview>()
-        val postBlocks = html.split(Regex("""<tbody\s+id=["']post_\d+["']|<div\s+class=["'][^"']*post_wrap[^"']*["']""", RegexOption.IGNORE_CASE))
+        val postBlocks = html.split(Regex("""<tbody\s+id=["']post_\d+["']""", RegexOption.IGNORE_CASE))
 
-        // Первый пост — это сама раздача, отзывы пользователей начинаются дальше
-        val userPosts = if (postBlocks.size > 2) postBlocks.drop(2) else postBlocks.drop(1)
+        val userPosts = if (postBlocks.size > 2) postBlocks.drop(2) else if (postBlocks.size > 1) postBlocks.drop(1) else emptyList()
 
         for (post in userPosts) {
             if (reviews.size >= 8) break
 
-            val nickMatch = Regex("""class=["'][^"']*nick[^"']*["'][^>]*>(?:<[^>]+>)*([^<]+)""", RegexOption.IGNORE_CASE).find(post)
-            val author = nickMatch?.groupValues?.get(1)?.trim() ?: ""
+            var author = ""
+            val nickIdx = post.indexOf("class=\"nick")
+            if (nickIdx != -1) {
+                val nickBlock = post.substring(nickIdx, (nickIdx + 250).coerceAtMost(post.length))
+                val nickEnd = nickBlock.indexOf("</p>").let { if (it != -1) it else nickBlock.indexOf("</td>") }
+                if (nickEnd != -1) {
+                    author = cleanHtmlEntities(nickBlock.substring(0, nickEnd)).trim()
+                }
+            }
+            if (author.isBlank()) {
+                val nickMatch = Regex("""class=["'][^"']*nick[^"']*["'][^>]*>(?:<[^>]+>)*\s*([^<>\n]+)""", RegexOption.IGNORE_CASE).find(post)
+                author = nickMatch?.groupValues?.get(1)?.trim() ?: ""
+            }
             if (author.isBlank()) continue
 
-            val dateMatch = Regex("""class=["'][^"']*p-link[^"']*["'][^>]*>(?:<[^>]+>)*([^<]+)""", RegexOption.IGNORE_CASE).find(post)
-                ?: Regex("""class=["'][^"']*post-time[^"']*["'][^>]*>(?:<[^>]+>)*([^<]+)""", RegexOption.IGNORE_CASE).find(post)
-            val date = dateMatch?.groupValues?.get(1)?.trim() ?: ""
-
-            val bodyMatch = Pattern.compile(
-                """<div[^>]+class=["'][^"']*post_body[^"']*["'][^>]*>(.*?)</div>""",
-                Pattern.CASE_INSENSITIVE or Pattern.DOTALL
-            ).matcher(post)
-
-            if (bodyMatch.find()) {
-                var rawBody = bodyMatch.group(1) ?: ""
-                rawBody = Pattern.compile("""<div\s+class=["']q-wrap["']>.*?</div>""", Pattern.DOTALL or Pattern.CASE_INSENSITIVE).matcher(rawBody).replaceAll("")
-                rawBody = Pattern.compile("""<div\s+class=["']sp-wrap["']>.*?</div>""", Pattern.DOTALL or Pattern.CASE_INSENSITIVE).matcher(rawBody).replaceAll("")
-
-                val cleanText = cleanHtmlEntities(rawBody)
-                    .replace(Regex("""\s+"""), " ")
-                    .trim()
-
-                if (cleanText.length in 12..600) {
-                    reviews.add(
-                        MovieReview(
-                            author = author,
-                            date = date,
-                            text = cleanText
-                        )
-                    )
+            var date = ""
+            val pLinkIdx = post.indexOf("class=\"p-link")
+            if (pLinkIdx != -1) {
+                val pLinkBlock = post.substring(pLinkIdx, (pLinkIdx + 150).coerceAtMost(post.length))
+                val pLinkEnd = pLinkBlock.indexOf("</a>")
+                if (pLinkEnd != -1) {
+                    date = cleanHtmlEntities(pLinkBlock.substring(0, pLinkEnd)).trim()
                 }
+            }
+            if (date.isBlank()) {
+                val dateMatch = Regex("""class=["'][^"']*post-time[^"']*["'][^>]*>(?:<[^>]+>)*\s*([^<>\n]+)""", RegexOption.IGNORE_CASE).find(post)
+                date = dateMatch?.groupValues?.get(1)?.trim() ?: ""
+            }
+
+            val bodyIdx = post.indexOf("class=\"post_body")
+            if (bodyIdx == -1) continue
+
+            val openCloseIdx = post.indexOf(">", bodyIdx)
+            if (openCloseIdx == -1) continue
+
+            var endIdx = post.length
+            val sigIdx = post.indexOf("class=\"signature", openCloseIdx)
+            if (sigIdx != -1 && sigIdx < endIdx) endIdx = sigIdx
+            val tdEndIdx = post.indexOf("</td>", openCloseIdx)
+            if (tdEndIdx != -1 && tdEndIdx < endIdx) endIdx = tdEndIdx
+
+            val rawBody = post.substring(openCloseIdx + 1, endIdx)
+
+            val withoutQuotes = Pattern.compile("""<div\s+class=["']q-wrap["']>.*?</div>""", Pattern.DOTALL or Pattern.CASE_INSENSITIVE).matcher(rawBody).replaceAll("")
+            val withoutSpoilers = Pattern.compile("""<div\s+class=["']sp-wrap["']>.*?</div>""", Pattern.DOTALL or Pattern.CASE_INSENSITIVE).matcher(withoutQuotes).replaceAll("")
+
+            val cleanText = cleanHtmlEntities(withoutSpoilers)
+                .replace(Regex("""\s+"""), " ")
+                .trim()
+
+            if (cleanText.length in 10..700) {
+                reviews.add(
+                    MovieReview(
+                        author = author,
+                        date = date,
+                        text = cleanText
+                    )
+                )
             }
         }
         return reviews
@@ -574,6 +649,14 @@ object RuTrackerScraper {
                     }
                 }
 
+                var sizeText = ""
+                val sizeMatch = Regex("""class=["'][^"']*tr-dl[^"']*["'][^>]*>(?:<[^>]+>)*\s*([\d.,]+\s*(?:GB|ГБ|MB|МБ|TB|ТБ))""", RegexOption.IGNORE_CASE).find(row)
+                    ?: Regex("""class=["'][^"']*tor-size[^"']*["'][^>]*>(?:<[^>]+>)*\s*([\d.,]+\s*(?:GB|ГБ|MB|МБ|TB|ТБ))""", RegexOption.IGNORE_CASE).find(row)
+                    ?: Regex("""([\d.,]+\s*(?:GB|ГБ|MB|МБ|TB|ТБ))""", RegexOption.IGNORE_CASE).find(row)
+                if (sizeMatch != null) {
+                    sizeText = cleanHtmlEntities(sizeMatch.groupValues[1]).trim()
+                }
+
                 val parsed = parseRuTrackerTitle(rawTitle)
                 val existingPoster = MovieCatalogService.findPoster(parsed.title, parsed.originalTitle)
 
@@ -586,7 +669,8 @@ object RuTrackerScraper {
                     releaseYear = parsed.year.ifBlank { "2024" },
                     rating = 0.0,
                     genre = parsed.genre.ifBlank { category.title.removePrefix("🎨 ").removePrefix("🔥 ").removePrefix("🏆 ").removePrefix("🍿 ") },
-                    seeds = seeds
+                    seeds = seeds,
+                    torrentSize = sizeText
                 )
 
                 if (result.none { it.id == item.id || it.title.equals(item.title, ignoreCase = true) }) {
@@ -614,7 +698,8 @@ object RuTrackerScraper {
                     releaseYear = parsed.year.ifBlank { "2024" },
                     rating = 0.0,
                     genre = parsed.genre.ifBlank { category.title.removePrefix("🎨 ").removePrefix("🔥 ").removePrefix("🏆 ").removePrefix("🍿 ") },
-                    seeds = 0
+                    seeds = 0,
+                    torrentSize = ""
                 )
 
                 if (result.none { it.id == item.id || it.title.equals(item.title, ignoreCase = true) }) {

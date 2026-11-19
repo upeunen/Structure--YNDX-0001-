@@ -2154,17 +2154,34 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
     fun selectMovieForReleases(movie: MovieCatalogItem) {
         vibrate(30)
+        val isRuTracker = movie.id > 1000L
         _uiState.value = _uiState.value.copy(
             selectedCatalogMovie = movie,
             isLoadingReleases = true,
             movieReleases = emptyList(),
             releasesError = null,
             currentMovieReviews = emptyList(),
-            isLoadingReviews = movie.id > 100000L
+            isLoadingReviews = isRuTracker
         )
 
-        if (movie.id > 100000L) {
+        if (isRuTracker) {
             loadMovieReviews(movie.id)
+
+            // Параллельно подгружаем полное описание фильма из темы, если оно еще не загружено
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val cookies = prefs.rutrackerCookies
+                    val ua = prefs.rutrackerUserAgent
+                    val baseUrl = prefs.lastRutrackerUrl.ifBlank { RuTrackerScraper.DEFAULT_BASE_URL }
+                    val cleanBase = RuTrackerScraper.getCleanBaseUrl(baseUrl)
+                    val enriched = RuTrackerScraper.enrichTopicDetails(cleanBase, cookies, ua, movie)
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        if (_uiState.value.selectedCatalogMovie?.id == movie.id) {
+                            _uiState.value = _uiState.value.copy(selectedCatalogMovie = enriched)
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
         }
 
         viewModelScope.launch {
@@ -2175,11 +2192,11 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             ).toMutableList()
 
             // Если фильм получен из RuTracker и есть куки, добавляем прямую раздачу на первое место
-            if (movie.id > 1000L && hasRuTrackerAuthCookies()) {
+            if (isRuTracker && hasRuTrackerAuthCookies()) {
                 val ruRelease = TorrentRelease(
-                    title = "⚡ Оригинальная раздача с RuTracker [${movie.genre}]",
-                    size = "RuTracker",
-                    seeds = if (movie.seeds > 0) movie.seeds else 100,
+                    title = "⚡ Раздача с RuTracker [${movie.genre}]",
+                    size = if (movie.torrentSize.isNotBlank()) movie.torrentSize else "RuTracker",
+                    seeds = movie.seeds,
                     magnetUrl = "rutracker_topic_${movie.id}"
                 )
                 list.add(0, ruRelease)

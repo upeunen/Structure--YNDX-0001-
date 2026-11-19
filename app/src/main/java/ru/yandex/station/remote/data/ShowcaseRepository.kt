@@ -65,7 +65,8 @@ class ShowcaseRepository(context: Context) {
                         director = obj.optString("director", ""),
                         country = obj.optString("country", ""),
                         cast = obj.optString("cast", ""),
-                        voiceActing = obj.optString("voiceActing", "")
+                        voiceActing = obj.optString("voiceActing", ""),
+                        torrentSize = obj.optString("torrentSize", "")
                     )
                 )
             }
@@ -97,6 +98,7 @@ class ShowcaseRepository(context: Context) {
                 put("country", m.country)
                 put("cast", m.cast)
                 put("voiceActing", m.voiceActing)
+                put("torrentSize", m.torrentSize)
             }
             arr.put(obj)
         }

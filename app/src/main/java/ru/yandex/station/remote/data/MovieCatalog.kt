@@ -27,7 +27,8 @@ data class MovieCatalogItem(
     val director: String = "",
     val country: String = "",
     val cast: String = "",
-    val voiceActing: String = ""
+    val voiceActing: String = "",
+    val torrentSize: String = ""
 )
 
 data class MovieSection(

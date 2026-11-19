@@ -823,7 +823,7 @@ fun ShowcaseDetailsSheet(
             }
 
             // Прямой запуск раздачи с RuTracker на ТВ
-            if (movie.id > 100000) {
+            if (movie.id > 1000) {
                 Spacer(modifier = Modifier.height(10.dp))
                 Button(
                     onClick = onPlayDirectTopic,
@@ -889,26 +889,50 @@ fun ShowcaseDetailsSheet(
                 }
             }
 
-            // Полный развернутый синопсис сюжета
-            if (movie.overview.isNotBlank()) {
-                Spacer(modifier = Modifier.height(14.dp))
-                Text(
-                    text = "📖 Сюжет",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AccentYandex
-                )
-                Spacer(modifier = Modifier.height(4.dp))
+            // Развернутый синопсис сюжета
+            val hasRealOverview = movie.overview.isNotBlank() && !movie.overview.startsWith("Раздача из раздела")
+            Spacer(modifier = Modifier.height(14.dp))
+            Text(
+                text = "📖 Сюжет",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = AccentYandex
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            if (hasRealOverview) {
                 Text(
                     text = movie.overview,
                     fontSize = 13.sp,
                     color = TextPrimary,
                     lineHeight = 18.sp
                 )
+            } else {
+                Surface(
+                    color = DarkSurfaceElevated,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            color = AccentYandex,
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Загрузка сюжета и описания фильма...",
+                            fontSize = 12.sp,
+                            color = TextSecondary
+                        )
+                    }
+                }
             }
 
             // Живые отзывы зрителей с RuTracker
-            if (movie.id > 100000) {
+            if (movie.id > 1000) {
                 Spacer(modifier = Modifier.height(16.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),

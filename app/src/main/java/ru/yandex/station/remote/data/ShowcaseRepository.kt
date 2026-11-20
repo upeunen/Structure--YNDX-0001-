@@ -42,6 +42,21 @@ class ShowcaseRepository(context: Context) {
         saveCategoryMovies(KEY_RUTRACKER_SAVED, current)
     }
 
+    fun addRuTrackerFindings(items: List<MovieCatalogItem>) {
+        val validNew = items.filter { isRealMovie(it) }
+        if (validNew.isEmpty()) return
+        val current = getRuTrackerMovies().toMutableList()
+        val combined = mutableListOf<MovieCatalogItem>()
+        combined.addAll(validNew)
+        for (old in current) {
+            if (combined.none { it.id == old.id || it.title.equals(old.title, ignoreCase = true) }) {
+                combined.add(old)
+            }
+        }
+        val finalFindings = combined.take(100)
+        saveCategoryMovies(KEY_RUTRACKER_SAVED, finalFindings)
+    }
+
     fun getCategoryMovies(categoryId: String): List<MovieCatalogItem> {
         val key = if (categoryId == KEY_RUTRACKER_SAVED) KEY_RUTRACKER_SAVED else "$PREFIX_CATEGORY$categoryId"
         val jsonStr = prefs.getString(key, null) ?: return emptyList()

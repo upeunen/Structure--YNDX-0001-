@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,6 +37,9 @@ fun SettingsDialog(
     currentIp: String,
     currentPort: Int,
     connectionStatus: StationConnectionStatus,
+    voiceBeepEnabled: Boolean = true,
+    onToggleVoiceBeep: ((Boolean) -> Unit)? = null,
+    onTestVoiceBeep: (() -> Unit)? = null,
     debugLogs: List<String> = emptyList(),
     onTestConnection: () -> Unit,
     onCleanMemory: (() -> Unit)? = null,
@@ -165,6 +169,71 @@ fun SettingsDialog(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Очистить память Станции (кэш)", fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                // Настройка оповещения при передаче голоса на сервер
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated.copy(alpha = 0.6f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Сигнал отправки на сервер",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                )
+                                Text(
+                                    text = "Звуковой бип из колонки при отправке голоса в облако",
+                                    fontSize = 11.sp,
+                                    color = TextSecondary,
+                                    lineHeight = 14.sp
+                                )
+                            }
+                            if (onToggleVoiceBeep != null) {
+                                Switch(
+                                    checked = voiceBeepEnabled,
+                                    onCheckedChange = onToggleVoiceBeep,
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.Black,
+                                        checkedTrackColor = AccentYandex,
+                                        uncheckedThumbColor = TextSecondary,
+                                        uncheckedTrackColor = DarkSurface
+                                    )
+                                )
+                            }
+                        }
+
+                        if (voiceBeepEnabled && onTestVoiceBeep != null) {
+                            OutlinedButton(
+                                onClick = onTestVoiceBeep,
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentBlue),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, AccentBlue.copy(alpha = 0.4f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.VolumeUp,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Проверить звук на Станции", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
                     }
                 }
 

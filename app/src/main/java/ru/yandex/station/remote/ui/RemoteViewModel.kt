@@ -91,7 +91,8 @@ data class RemoteUiState(
     val isRuTrackerCaptchaWaiting: Boolean = false,
     val pendingBrowserUrl: String? = null,
     val currentMovieReviews: List<MovieReview> = emptyList(),
-    val isLoadingReviews: Boolean = false
+    val isLoadingReviews: Boolean = false,
+    val voiceBeepEnabled: Boolean = true
 )
 
 class RemoteViewModel(application: Application) : AndroidViewModel(application) {
@@ -109,7 +110,8 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             youtubeHistory = youtubeHistoryRepo.getHistory(),
             cinemaMovies = historyRepo.getHistory(),
             customAddedCategories = prefs.customAddedCategories,
-            enabledShowcaseCategories = prefs.enabledRuTrackerCategories
+            enabledShowcaseCategories = prefs.enabledRuTrackerCategories,
+            voiceBeepEnabled = prefs.voiceBeepEnabled
         )
     )
     val uiState: StateFlow<RemoteUiState> = _uiState.asStateFlow()
@@ -237,7 +239,17 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         val prevStatus = _uiState.value.connectionStatus
-        val res = adbClient.testConnectionDetailed()
+        var res = adbClient.testConnectionDetailed()
+
+        // Защита от единичного сетевого джиттера Wi-Fi:
+        // Если первая попытка не удалась, но ранее связь была OK — делаем быстрый повтор
+        if (!res.isSuccess && !isManualCheck && prevStatus == StationConnectionStatus.CONNECTED) {
+            delay(300)
+            val retryRes = adbClient.testConnectionDetailed()
+            if (retryRes.isSuccess) {
+                res = retryRes
+            }
+        }
 
         if (!res.isSuccess) {
             stopPlaybackMonitor()
@@ -254,15 +266,18 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             addLog("Связь OK: пинг ${res.tcpConnectMs}мс, ответ ADB ${res.handshakeMs}мс (всего ${res.durationMs}мс)")
         }
 
-        // Синхронизация реального времени воспроизведения с ТВ (SmartTube или VLC)
-        if (_uiState.value.isRemoteModalOpen) {
-            val mediaInfo = StationMediaManager.getMediaInfo(adbClient)
-            if (mediaInfo != null && (mediaInfo.isPlaying || mediaInfo.state == 2 || mediaInfo.state == 6)) {
-                activePositionSec = mediaInfo.positionSec
-                isPlaybackPaused = mediaInfo.state == 2
+        // Синхронизация реального времени воспроизведения с ТВ (VLC, SmartTube и др.)
+        // Выполняем быстрый опрос только если пульт открыт и playbackMonitor еще не активен
+        if (_uiState.value.isRemoteModalOpen && playbackMonitorJob == null) {
+            val session = readActiveMediaSessionFast()
+            if (session != null && (session.first == 3 || session.first == 2 || session.first == 6)) {
+                activePositionSec = session.second / 1000L
+                val isPlayingNow = session.first == 3
+                isPlaybackPaused = session.first == 2
+                val isRecentUserAction = (System.currentTimeMillis() - lastUserActionTime < 2500L)
                 _uiState.value = _uiState.value.copy(
                     activePlaybackSec = activePositionSec,
-                    isPlaying = mediaInfo.isPlaying
+                    isPlaying = if (isRecentUserAction) _uiState.value.isPlaying else isPlayingNow
                 )
             }
         }
@@ -353,16 +368,17 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.value = _uiState.value.copy(isRemoteModalOpen = true)
         checkConnection()
         viewModelScope.launch {
-            StationMediaManager.ensureDeployed(getApplication(), adbClient)
-            val info = StationMediaManager.getMediaInfo(adbClient)
-            if (info != null && (info.isPlaying || info.state == 2 || info.state == 6)) {
-                activePositionSec = info.positionSec
-                isPlaybackPaused = info.state == 2
+            // Мгновенный системный опрос состояния без тяжелого запуска JVM
+            val quickSession = readActiveMediaSessionFast()
+            if (quickSession != null && (quickSession.first == 3 || quickSession.first == 2 || quickSession.first == 6)) {
+                activePositionSec = quickSession.second / 1000L
+                isPlaybackPaused = quickSession.first == 2
                 _uiState.value = _uiState.value.copy(
                     activePlaybackSec = activePositionSec,
-                    isPlaying = info.isPlaying
+                    isPlaying = quickSession.first == 3
                 )
             }
+            StationMediaManager.ensureDeployed(getApplication(), adbClient)
         }
     }
 
@@ -429,6 +445,24 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         adbClient = AdbClient(newIp, newPort)
         torrServerClient = TorrServerClient(newIp, _uiState.value.torrServerPort)
         checkConnection()
+    }
+
+    fun setVoiceBeepEnabled(enabled: Boolean) {
+        prefs.voiceBeepEnabled = enabled
+        _uiState.value = _uiState.value.copy(voiceBeepEnabled = enabled)
+        viewModelScope.launch {
+            val cmd = if (enabled) "echo 1 > /data/local/tmp/voice_beep_enabled" else "echo 0 > /data/local/tmp/voice_beep_enabled"
+            adbClient.execute(cmd)
+            addLog("Оповещение звуком при передаче на сервер: ${if (enabled) "ВКЛ" else "ВЫКЛ"}")
+        }
+    }
+
+    fun testVoiceBeep() {
+        viewModelScope.launch {
+            StationMediaManager.ensureDeployed(getApplication(), adbClient)
+            adbClient.execute("CLASSPATH=/data/local/tmp/station_media.dex app_process /data/local/tmp ru.yandex.station.media.StationMediaTool beep")
+            addLog("Тестовый сигнал отправлен на Станцию")
+        }
     }
 
     fun checkConnection() {
@@ -521,30 +555,32 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
     fun mediaPlayPause() {
         vibrate(40)
         cancelYouTubeAutoHide()
-        lastUserActionTime = System.currentTimeMillis()
+        val now = System.currentTimeMillis()
+        lastUserActionTime = now
         val targetPlaying = !_uiState.value.isPlaying
-        _uiState.value = _uiState.value.copy(isPlaying = targetPlaying)
+        _uiState.value = _uiState.value.copy(
+            isPlaying = targetPlaying,
+            lastMessage = if (targetPlaying) "▶ Воспроизведение" else "⏸ Пауза"
+        )
         isPlaybackPaused = !targetPlaying
 
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val cmd = if (targetPlaying) {
-                "media dispatch play; input keyevent 126; input keyevent 85"
-            } else {
-                "media dispatch pause; input keyevent 127; input keyevent 85"
-            }
+            // Прямая отправка команды в Android MediaSession (без побочных keyevent)
+            val cmd = if (targetPlaying) "media dispatch play" else "media dispatch pause"
             adbClient.executeFast(cmd)
-            if (targetPlaying) {
-                StationMediaManager.play(adbClient)
-            } else {
-                StationMediaManager.pause(adbClient)
-            }
 
-            delay(400)
-            val session = readVlcSession()
+            // Даем плееру 350мс на переключение и считываем подтверждение
+            delay(350)
+            val session = readActiveMediaSessionFast()
             if (session != null) {
-                val realPlaying = session.first == 3
-                _uiState.value = _uiState.value.copy(isPlaying = realPlaying)
-                isPlaybackPaused = !realPlaying
+                // Если пользователь не нажимал новые кнопки, сверяем статус
+                if (System.currentTimeMillis() - lastUserActionTime < 2500L) {
+                    val realPlaying = session.first == 3
+                    if (realPlaying == targetPlaying) {
+                        _uiState.value = _uiState.value.copy(isPlaying = realPlaying)
+                        isPlaybackPaused = !realPlaying
+                    }
+                }
             }
         }
     }
@@ -981,6 +1017,13 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 return@launch
             }
 
+            // Если это ссылка на раздачу с RuTracker (из браузера / «Смотреть позже»), скачиваем и запускаем с авторизацией
+            val topicId = Regex("[?&]t=(\\d+)").find(targetMovie.magnetUrl)?.groupValues?.get(1)?.toLongOrNull()
+            if (topicId != null && (targetMovie.magnetUrl.contains("dl.php") || targetMovie.magnetUrl.contains("viewtopic.php") || targetMovie.magnetUrl.contains("rutracker", ignoreCase = true))) {
+                playRuTrackerTopic(topicId, targetMovie.title)
+                return@launch
+            }
+
             // 1. Отправляем в TorrServer Silo на Станции
             addLog("addTorrent: ${targetMovie.title}")
             val addResult = torrServerClient.addTorrent(targetMovie.magnetUrl, targetMovie.title)
@@ -1227,17 +1270,48 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         playbackMonitorJob = null
     }
 
-    // Читает реальное состояние VLC на ТВ: (state, positionMs) или null, если сессия не найдена
-    private suspend fun readVlcSession(): Pair<Int, Long>? {
+    // Быстрое и легкое чтение активной медиасессии на ТВ (VLC, SmartTube, YouTube и др.):
+    // (state, positionMs) где state: 3 = PLAYING, 2 = PAUSED, 6 = BUFFERING
+    private suspend fun readActiveMediaSessionFast(): Pair<Int, Long>? {
         val res = adbClient.execute("dumpsys media_session")
         if (!res.isSuccess) return null
         val out = res.getOrNull().orEmpty()
-        val idx = out.indexOf("org.videolan.vlc")
-        if (idx < 0) return null
-        val chunk = out.substring(idx, minOf(out.length, idx + 3000))
-        val m = Regex("state=PlaybackState \\{state=(\\d+), position=(\\d+)").find(chunk) ?: return null
-        return m.groupValues[1].toInt() to m.groupValues[2].toLong()
+        if (out.isEmpty()) return null
+
+        // 1. Приоритетно проверяем VLC (основной плеер фильмов и сериалов)
+        val vlcIdx = out.indexOf("org.videolan.vlc")
+        if (vlcIdx >= 0) {
+            val chunk = out.substring(vlcIdx, minOf(out.length, vlcIdx + 3000))
+            val m = Regex("state=PlaybackState \\{state=(\\d+), position=(\\d+)").find(chunk)
+            if (m != null) {
+                return m.groupValues[1].toInt() to m.groupValues[2].toLong()
+            }
+        }
+
+        // 2. Проверяем SmartTube / YouTube
+        val stIdx = out.indexOf("com.liskovsoft.smarttubetv").takeIf { it >= 0 }
+            ?: out.indexOf("com.google.android.youtube.tv").takeIf { it >= 0 }
+        if (stIdx != null && stIdx >= 0) {
+            val chunk = out.substring(stIdx, minOf(out.length, stIdx + 3000))
+            val m = Regex("state=PlaybackState \\{state=(\\d+), position=(\\d+)").find(chunk)
+            if (m != null) {
+                return m.groupValues[1].toInt() to m.groupValues[2].toLong()
+            }
+        }
+
+        // 3. Универсальный поиск любой активной медиасессии со state=3 (playing) или state=2 (paused)
+        val matches = Regex("state=PlaybackState \\{state=(\\d+), position=(\\d+)").findAll(out)
+        for (m in matches) {
+            val state = m.groupValues[1].toInt()
+            if (state == 3 || state == 2 || state == 6) {
+                return state to m.groupValues[2].toLong()
+            }
+        }
+
+        return null
     }
+
+    private suspend fun readVlcSession(): Pair<Int, Long>? = readActiveMediaSessionFast()
 
     private fun startPlaybackMonitor(torrentHash: String, file: TorrentVideoFile, movie: MovieItem) {
         stopPlaybackMonitor()
@@ -1492,7 +1566,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 lastMessage = "Пауза: наполнение буфера торрента..."
             )
             // 1. Ставим плеер на паузу
-            executeCommand("media dispatch play-pause")
+            executeCommand("media dispatch pause")
 
             // 2. Будим торрент и запрашиваем наполнение кэша для точного fileId
             val activeMovie = _uiState.value.activeMoviePlaying
@@ -1526,7 +1600,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 val adbCmd = "am start -n org.videolan.vlc/.StartActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\""
                 adbClient.execute(adbCmd)
             } else {
-                executeCommand("media dispatch play-pause")
+                executeCommand("media dispatch play")
             }
 
             _uiState.value = _uiState.value.copy(
@@ -1635,14 +1709,26 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         return url
     }
 
+    private fun cleanRuTrackerBrowserTitle(pageTitle: String, targetUrl: String): String {
+        var clean = pageTitle.trim()
+        if (clean.contains(" :: ")) {
+            clean = clean.substringBefore(" :: ").trim()
+        }
+        clean = clean.replace(Regex("""\s*::\s*RuTracker\.org.*""", RegexOption.IGNORE_CASE), "").trim()
+        clean = clean.replace(Regex("""\s*-\s*RuTracker\.org.*""", RegexOption.IGNORE_CASE), "").trim()
+        clean = clean.replace(Regex("""\s*\[\s*RuTracker\.org\s*\]""", RegexOption.IGNORE_CASE), "").trim()
+
+        if (clean.isBlank() || clean.equals("RuTracker.org", ignoreCase = true) || clean.equals("RuTracker", ignoreCase = true)) {
+            val topicId = Regex("[?&]t=(\\d+)").find(targetUrl)?.groupValues?.get(1)
+            return if (!topicId.isNullOrBlank()) "Раздача #$topicId" else "Раздача RuTracker"
+        }
+        return clean
+    }
+
     fun bookmarkFromBrowser(targetUrl: String, pageTitle: String) {
         vibrate(55)
         viewModelScope.launch {
-            val cleanTitle = if (pageTitle.isNotBlank() && !pageTitle.contains("RuTracker", ignoreCase = true)) {
-                pageTitle.substringBefore(" :: ").substringBefore(" [").trim()
-            } else {
-                "Раздача RuTracker"
-            }
+            val cleanTitle = cleanRuTrackerBrowserTitle(pageTitle, targetUrl)
             val movie = MovieItem(
                 id = "bm_rt_" + (targetUrl.hashCode().toLong() and 0x7FFFFFFF),
                 title = cleanTitle,
@@ -1651,7 +1737,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 seeds = 100,
                 magnetUrl = targetUrl,
                 category = "⭐ Закладки",
-                description = "Добавлено из RuTracker: $pageTitle",
+                description = "Сохранено из RuTracker",
                 isFavorite = true
             )
             historyRepo.toggleFavorite(movie)
@@ -1661,14 +1747,10 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun addToWatchLaterFromBrowser(targetUrl: String, pageTitle: String) {
+    fun addToWatchLaterFromBrowser(targetUrl: String, pageTitle: String, forumIdStr: String = "", forumTitle: String = "") {
         vibrate(55)
         viewModelScope.launch {
-            val cleanTitle = if (pageTitle.isNotBlank() && !pageTitle.contains("RuTracker", ignoreCase = true)) {
-                pageTitle.substringBefore(" :: ").substringBefore(" [").trim()
-            } else {
-                "Раздача RuTracker"
-            }
+            val cleanTitle = cleanRuTrackerBrowserTitle(pageTitle, targetUrl)
             val movie = MovieItem(
                 id = "wl_rt_" + (targetUrl.hashCode().toLong() and 0x7FFFFFFF),
                 title = cleanTitle,
@@ -1677,13 +1759,47 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 seeds = 100,
                 magnetUrl = targetUrl,
                 category = "Смотреть позже",
-                description = "Сохранено из RuTracker: $pageTitle",
+                description = "Сохранено из RuTracker",
                 isFavorite = false
             )
             historyRepo.addToWatchLater(movie)
-            _uiState.value = _uiState.value.copy(
-                lastMessage = "📌 Добавлено в «Смотреть позже»: $cleanTitle"
-            )
+
+            val forumId = forumIdStr.toIntOrNull()
+            if (forumId != null && forumId > 0) {
+                val fTitle = forumTitle.ifBlank { "раздела RuTracker" }
+                showMessage("Фильм сохранен! Раздел «$fTitle» сканируется для Витрины...")
+                addLog("RuTracker: пользователь добавил фильм в «Смотреть позже», запускаем сбор раздела «$fTitle» (f=$forumId)")
+                scanForumForShowcaseFindings(forumId, fTitle)
+            } else {
+                showMessage("📌 Добавлено в «Смотреть позже»: $cleanTitle")
+            }
+        }
+    }
+
+    fun scanForumForShowcaseFindings(forumId: Int, forumTitle: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                addLog("RuTracker: сканирование раздела «$forumTitle» (f=$forumId) для полки «Находки»...")
+                val category = RuTrackerCategory("forum_$forumId", forumTitle, forumId)
+                val baseUrl = prefs.lastRutrackerUrl.ifEmpty { RuTrackerScraper.DEFAULT_BASE_URL }
+                val items = RuTrackerScraper.fetchCategoryMovies(
+                    baseUrl = baseUrl,
+                    cookies = prefs.rutrackerCookies,
+                    userAgent = prefs.rutrackerUserAgent,
+                    category = category,
+                    limit = 30
+                )
+                if (items.isNotEmpty()) {
+                    showcaseRepo.addRuTrackerFindings(items)
+                    loadMovieCatalog(forceRefreshRuTracker = false)
+                    addLog("RuTracker: полка «Находки» пополнена из раздела «$forumTitle» (+${items.size} раздач)")
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        showMessage("Витрина обновлена: +${items.size} находок из «$forumTitle»! 🎉")
+                    }
+                }
+            } catch (e: Exception) {
+                addLog("RuTracker: ошибка сканирования раздела f=$forumId: ${e.message}")
+            }
         }
     }
 

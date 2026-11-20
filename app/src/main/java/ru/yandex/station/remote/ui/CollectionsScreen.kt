@@ -265,6 +265,11 @@ fun CollectionsScreen(
                                 }
 
                                 @android.webkit.JavascriptInterface
+                                fun bookmarkWithForum(url: String, title: String, forumIdStr: String, forumTitle: String) {
+                                    viewModel.addToWatchLaterFromBrowser(url, title, forumIdStr, forumTitle)
+                                }
+
+                                @android.webkit.JavascriptInterface
                                 fun saveTopicToCatalog(topicId: String, title: String, posterUrl: String, overview: String, year: String, category: String) {
                                     viewModel.saveRuTrackerTopicToShowcase(topicId, title, posterUrl, overview, year, category)
                                 }
@@ -357,12 +362,65 @@ fun CollectionsScreen(
                                                 var pressTimer = null;
                                                 var isLong = false;
 
+                                                function getBestTitle() {
+                                                    var tName = '';
+                                                    var tr = elem.closest ? elem.closest('tr') : null;
+                                                    if (tr) {
+                                                        var rowLink = tr.querySelector('a.tt-text, a[href*="viewtopic.php?t="]');
+                                                        if (rowLink && rowLink.textContent) {
+                                                            tName = rowLink.textContent.trim();
+                                                        }
+                                                    }
+                                                    if (!tName) {
+                                                        var topicEl = document.querySelector('#topic-title, .maintitle, h1');
+                                                        if (topicEl && topicEl.textContent) {
+                                                            tName = topicEl.textContent.trim();
+                                                        }
+                                                    }
+                                                    if (!tName && document.title) {
+                                                        tName = document.title.replace(/\s*::\s*RuTracker\.org.*/i, '').trim();
+                                                    }
+                                                    return tName;
+                                                }
+
+                                                function getForumInfo() {
+                                                    var fid = '';
+                                                    var ftitle = '';
+                                                    var fLinks = document.querySelectorAll('a[href*="viewforum.php?f="]');
+                                                    if (fLinks && fLinks.length > 0) {
+                                                        for (var k = fLinks.length - 1; k >= 0; k--) {
+                                                            var fl = fLinks[k];
+                                                            var m = fl.href.match(/[?&]f=(\d+)/);
+                                                            if (m) {
+                                                                fid = m[1];
+                                                                ftitle = fl.textContent ? fl.textContent.trim() : '';
+                                                                if (ftitle && ftitle.length > 2) break;
+                                                            }
+                                                        }
+                                                    }
+                                                    if (!fid && window.location.href.indexOf('viewforum.php') !== -1) {
+                                                        var curMatch = window.location.href.match(/[?&]f=(\d+)/);
+                                                        if (curMatch) {
+                                                            fid = curMatch[1];
+                                                            var h1 = document.querySelector('h1, #topic-title, .maintitle');
+                                                            ftitle = h1 && h1.textContent ? h1.textContent.trim() : 'Раздел RuTracker';
+                                                        }
+                                                    }
+                                                    return { id: fid, title: ftitle };
+                                                }
+
                                                 function startTimer() {
                                                     isLong = false;
                                                     pressTimer = setTimeout(function() {
                                                         isLong = true;
+                                                        var tName = getBestTitle();
+                                                        var fInfo = getForumInfo();
                                                         if (window.PultBridge) {
-                                                            window.PultBridge.bookmark(elem.href, document.title);
+                                                            if (window.PultBridge.bookmarkWithForum && fInfo.id) {
+                                                                window.PultBridge.bookmarkWithForum(elem.href, tName, fInfo.id, fInfo.title);
+                                                            } else {
+                                                                window.PultBridge.bookmark(elem.href, tName);
+                                                            }
                                                         }
                                                         var origBg = elem.style.background;
                                                         var origText = elem.textContent;
@@ -396,8 +454,9 @@ fun CollectionsScreen(
                                                 elem.addEventListener('touchcancel', clearTimer, {passive: true});
                                                 elem.addEventListener('contextmenu', function(e) {
                                                     e.preventDefault();
+                                                    var tName = getBestTitle();
                                                     if (window.PultBridge) {
-                                                        window.PultBridge.bookmark(elem.href, document.title);
+                                                        window.PultBridge.bookmark(elem.href, tName);
                                                     }
                                                 });
                                             })(a);

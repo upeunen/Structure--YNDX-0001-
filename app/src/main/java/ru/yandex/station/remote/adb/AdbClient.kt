@@ -122,15 +122,15 @@ class AdbClient(
         val startTotal = System.currentTimeMillis()
         var tcpConnectMs = 0L
         try {
-            kotlinx.coroutines.withTimeout(5000L) {
+            kotlinx.coroutines.withTimeout(6500L) {
                 Socket().use { socket ->
                     socket.reuseAddress = true
                     socket.tcpNoDelay = true
                     socket.setSoLinger(true, 0)
-                    socket.soTimeout = 3500
+                    socket.soTimeout = 4500
 
                     val startTcp = System.currentTimeMillis()
-                    socket.connect(InetSocketAddress(host, port), 3500)
+                    socket.connect(InetSocketAddress(host, port), 4500)
                     tcpConnectMs = System.currentTimeMillis() - startTcp
 
                     val out = socket.getOutputStream()
@@ -168,10 +168,10 @@ class AdbClient(
             }
         } catch (e: Exception) {
             val err = when (e) {
-                is java.net.SocketTimeoutException -> "Таймаут сокета Станции (>3.5 сек)"
+                is java.net.SocketTimeoutException -> "Таймаут сокета Станции (>4.5 сек)"
                 is java.net.ConnectException -> "Порт $port отклонил подключение (${e.message ?: "нет ответа"})"
                 is java.net.NoRouteToHostException -> "Нет маршрута к $host (телефон не в домашней Wi-Fi сети)"
-                is kotlinx.coroutines.TimeoutCancellationException -> "Превышен общий лимит ожидания (5 сек)"
+                is kotlinx.coroutines.TimeoutCancellationException -> "Превышен общий лимит ожидания (6.5 сек)"
                 else -> "${e.javaClass.simpleName}: ${e.message ?: "ошибка сети"}"
             }
             ConnectionTestResult(

@@ -753,7 +753,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             lastMessage = "Остановлено: экран Алисы включен"
         )
         viewModelScope.launch {
-            val cmd = "am force-stop org.videolan.vlc; am force-stop org.smarttube.stable; am force-stop org.schabi.newpipe; am force-stop top.rootu.lampa; input keyevent 86; input keyevent 3; am start -a android.intent.action.MAIN -c android.intent.category.HOME"
+            val cmd = "am force-stop org.videolan.vlc; am force-stop org.smarttube.stable; am force-stop org.schabi.newpipe; am force-stop top.rootu.lampa; input keyevent 86; input keyevent 3; (su 0 /system/bin/sh -c 'echo 3 > /proc/sys/vm/drop_caches') >/dev/null 2>&1 & am start -a android.intent.action.MAIN -c android.intent.category.HOME"
             val result = adbClient.execute(cmd)
             if (result.isSuccess) {
                 _uiState.value = _uiState.value.copy(connectionStatus = StationConnectionStatus.CONNECTED)

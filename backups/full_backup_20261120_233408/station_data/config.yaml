@@ -1,0 +1,20 @@
+server:
+    host: 0.0.0.0
+    port: 8091
+storage:
+    data_dir: data
+    db_name: torrserver.db
+plugins:
+    dir: plugins
+torrent:
+    cache_size_mb: 60
+    peers_limit: 30
+    download_rate_kb: 0
+    upload_rate_kb: 0
+logging:
+    level: info
+    file: ""
+auth:
+    owner_password: ""
+ffmpeg:
+    enabled: false

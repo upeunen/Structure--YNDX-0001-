@@ -1,0 +1,156 @@
+[18783:18975] [2026-11-20 23:14:54.666] [backend_status] [info] [backend_status_capability.cpp:156] Status changed from Available to UnknownStatus
+[18783:18977] [2026-11-20 23:15:10.959] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18977] [2026-11-20 23:15:10.959] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:19044] [2026-11-20 23:15:15.690] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:15:15.691] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18974] [2026-11-20 23:15:24.945] [backend_status] [info] [backend_status_capability.cpp:156] Status changed from UnknownStatus to Available
+[18783:18976] [2026-11-20 23:15:24.945] [SmartVolume] [info] [smart_volume_capability.cpp:639] Reset state
+[18783:18989] [2026-11-20 23:15:24.988] [sdk] [info] [directive_sequencer.cpp:663] addDirectives  [(xxd1213da2)notify]
+[18783:18989] [2026-11-20 23:15:24.989] [sdk] [info] [directive_sequencer.cpp:758] routeDirective (xxd1213da2)notify via NotificationCapability, vins=1795205724092626$bd789e52-920d-43ae-b880-df4c466aacbb$4201ac1a-c1555436-68aa54c9-b19d2006
+[18783:18975] [2026-11-20 23:15:24.992] [notifications] [info] [notification_capability.cpp:144] Notification version is outdated. Current version: 0; Notification version: 0
+[18783:18978] [2026-11-20 23:15:30.946] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18978] [2026-11-20 23:15:30.946] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18976] [2026-11-20 23:15:50.967] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18976] [2026-11-20 23:15:50.967] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18978] [2026-11-20 23:16:10.956] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18978] [2026-11-20 23:16:10.956] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:19044] [2026-11-20 23:16:16.687] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:16:16.688] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18981] [2026-11-20 23:16:30.974] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18981] [2026-11-20 23:16:30.974] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18972] [2026-11-20 23:16:50.954] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18972] [2026-11-20 23:16:50.954] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18983] [2026-11-20 23:17:11.018] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18983] [2026-11-20 23:17:11.018] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:19044] [2026-11-20 23:17:16.697] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:17:16.697] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18981] [2026-11-20 23:17:31.030] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18981] [2026-11-20 23:17:31.030] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18983] [2026-11-20 23:17:50.960] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18983] [2026-11-20 23:17:50.960] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18982] [2026-11-20 23:18:10.970] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18982] [2026-11-20 23:18:10.971] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:19044] [2026-11-20 23:18:16.708] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:18:16.709] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18975] [2026-11-20 23:18:30.995] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18975] [2026-11-20 23:18:30.996] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18978] [2026-11-20 23:18:50.977] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18978] [2026-11-20 23:18:50.977] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18979] [2026-11-20 23:19:10.981] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18979] [2026-11-20 23:19:10.981] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:19044] [2026-11-20 23:19:16.714] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:19:16.714] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18975] [2026-11-20 23:19:30.996] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18975] [2026-11-20 23:19:30.996] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18973] [2026-11-20 23:19:50.982] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18973] [2026-11-20 23:19:50.982] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18972] [2026-11-20 23:20:11.069] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18972] [2026-11-20 23:20:11.069] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18973] [2026-11-20 23:20:16.246] [base] [warning] [utils.cpp:83] Cannot open file '/tmp/run/platformd.pid'.
+[18783:18973] [2026-11-20 23:20:16.246] [base] [warning] [utils.cpp:83] Cannot open file '/tmp/run/mediad.pid'.
+[18783:19044] [2026-11-20 23:20:16.720] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:20:16.720] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18978] [2026-11-20 23:20:32.954] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18978] [2026-11-20 23:20:32.954] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18980] [2026-11-20 23:20:51.000] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18980] [2026-11-20 23:20:51.001] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18979] [2026-11-20 23:21:10.987] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18979] [2026-11-20 23:21:10.987] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:19044] [2026-11-20 23:21:16.729] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:21:16.729] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18974] [2026-11-20 23:21:31.069] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18974] [2026-11-20 23:21:31.070] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18974] [2026-11-20 23:21:50.990] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18974] [2026-11-20 23:21:50.990] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18974] [2026-11-20 23:22:11.009] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18974] [2026-11-20 23:22:11.010] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:19044] [2026-11-20 23:22:16.738] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:22:16.738] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18979] [2026-11-20 23:22:31.050] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18979] [2026-11-20 23:22:31.050] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18973] [2026-11-20 23:22:51.016] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18973] [2026-11-20 23:22:51.017] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18980] [2026-11-20 23:23:11.000] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18980] [2026-11-20 23:23:11.000] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:19044] [2026-11-20 23:23:16.744] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:23:16.745] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18977] [2026-11-20 23:23:31.028] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18977] [2026-11-20 23:23:31.029] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18980] [2026-11-20 23:23:51.019] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18980] [2026-11-20 23:23:51.019] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18976] [2026-11-20 23:24:11.012] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18976] [2026-11-20 23:24:11.012] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:19044] [2026-11-20 23:24:16.752] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:24:16.752] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18979] [2026-11-20 23:24:31.014] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18979] [2026-11-20 23:24:31.014] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:19044] [2026-11-20 23:25:16.799] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:25:16.799] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:19108] [2026-11-20 23:25:19.363] [threading] [info] [callback_queue_factory.cpp:172] AsioCallbackQueue: PEBackendClient.platformd_pool.platformd_cbqf
+[18783:19108] [2026-11-20 23:25:19.363] [info] [local_server.cpp:24] adding local connection 0x7f99865618
+[18783:19044] [2026-11-20 23:26:16.875] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:26:16.875] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18982] [2026-11-20 23:26:53.022] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18982] [2026-11-20 23:26:53.022] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18977] [2026-11-20 23:27:11.095] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18977] [2026-11-20 23:27:11.095] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:19044] [2026-11-20 23:27:17.771] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:27:17.771] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18975] [2026-11-20 23:27:31.028] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18975] [2026-11-20 23:27:31.028] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18982] [2026-11-20 23:27:51.037] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18982] [2026-11-20 23:27:51.038] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:19044] [2026-11-20 23:28:17.799] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:28:17.799] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18976] [2026-11-20 23:28:51.080] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18976] [2026-11-20 23:28:51.081] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18980] [2026-11-20 23:29:11.126] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18980] [2026-11-20 23:29:11.126] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:19044] [2026-11-20 23:29:18.783] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:29:18.783] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18981] [2026-11-20 23:29:31.091] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18981] [2026-11-20 23:29:31.091] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18980] [2026-11-20 23:30:11.049] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18980] [2026-11-20 23:30:11.049] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18974] [2026-11-20 23:30:16.485] [base] [warning] [utils.cpp:83] Cannot open file '/tmp/run/platformd.pid'.
+[18783:18974] [2026-11-20 23:30:16.486] [base] [warning] [utils.cpp:83] Cannot open file '/tmp/run/mediad.pid'.
+[18783:19044] [2026-11-20 23:30:18.789] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:30:18.789] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18981] [2026-11-20 23:30:31.132] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18981] [2026-11-20 23:30:31.132] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18975] [2026-11-20 23:30:51.053] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18975] [2026-11-20 23:30:51.053] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18973] [2026-11-20 23:31:11.066] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18973] [2026-11-20 23:31:11.067] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:19044] [2026-11-20 23:31:18.798] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:31:18.798] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18978] [2026-11-20 23:31:31.063] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18978] [2026-11-20 23:31:31.063] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18983] [2026-11-20 23:31:51.058] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18983] [2026-11-20 23:31:51.058] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18979] [2026-11-20 23:32:11.064] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18979] [2026-11-20 23:32:11.064] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:19044] [2026-11-20 23:32:18.807] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:32:18.808] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18983] [2026-11-20 23:32:53.050] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18983] [2026-11-20 23:32:53.050] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18976] [2026-11-20 23:33:11.063] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18976] [2026-11-20 23:33:11.063] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:19044] [2026-11-20 23:33:18.809] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:33:18.809] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18973] [2026-11-20 23:33:31.133] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18973] [2026-11-20 23:33:31.134] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18975] [2026-11-20 23:33:51.069] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18975] [2026-11-20 23:33:51.069] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18974] [2026-11-20 23:34:11.071] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18974] [2026-11-20 23:34:11.071] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:19044] [2026-11-20 23:34:18.814] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:34:18.814] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint
+[18783:18983] [2026-11-20 23:34:31.073] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18983] [2026-11-20 23:34:31.074] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18972] [2026-11-20 23:34:51.087] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18972] [2026-11-20 23:34:51.087] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:18979] [2026-11-20 23:35:11.074] [glagol] [info] [mdns_holder.cpp:60] NSD item discovered: YandexIOReceiver-44107896840848150ad0
+[18783:18979] [2026-11-20 23:35:11.074] [glagol] [info] [discovered_items.cpp:521] 44107896840848150ad0 new resolve YandexIOReceiver-44107896840848150ad0 _yandexio._tcp 192.168.100.6
+[18783:19044] [2026-11-20 23:35:18.817] [warning] [netlink_base.cpp:109] nlmsgerror -95 nlmsg_len = 28 payload length = 8
+[18783:19044] [2026-11-20 23:35:18.818] [warning] [netlink_base.cpp:110] Operation not supported on transport endpoint

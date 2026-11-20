@@ -213,9 +213,10 @@ class TorrServerClient(
         }
     }
 
-    // Ожидание метаданных и получение списка видеофайлов в раздаче
+    // Ожидание метаданных и получение списка медиафайлов (видео и аудио) в раздаче
     suspend fun waitForVideoFiles(torrentHash: String, maxWaitSec: Int = 20): List<TorrentVideoFile> = withContext(Dispatchers.IO) {
-        val videoExtensions = listOf(".mp4", ".mkv", ".avi", ".ts", ".mov", ".m2ts", ".webm", ".flv", ".vob", ".wmv")
+        val videoExtensions = listOf(".mp4", ".mkv", ".avi", ".ts", ".mov", ".m2ts", ".webm", ".flv", ".vob", ".wmv", ".iso")
+        val audioExtensions = listOf(".flac", ".mp3", ".m4a", ".aac", ".ogg", ".oga", ".wav", ".wma", ".ape", ".wv", ".opus", ".alac", ".ac3", ".dts", ".mka")
         val startTime = System.currentTimeMillis()
 
         while (System.currentTimeMillis() - startTime < maxWaitSec * 1000L) {
@@ -241,6 +242,7 @@ class TorrServerClient(
                                 val fileStats = tObj.optJSONArray("file_stats")
                                 if (fileStats != null && fileStats.length() > 0) {
                                     val videoFiles = mutableListOf<TorrentVideoFile>()
+                                    val audioFiles = mutableListOf<TorrentVideoFile>()
                                     val largeFallback = mutableListOf<TorrentVideoFile>()
 
                                     for (j in 0 until fileStats.length()) {
@@ -252,15 +254,26 @@ class TorrServerClient(
 
                                         val lower = "$path $name".lowercase()
                                         val isVideo = videoExtensions.any { ext -> lower.contains(ext) }
+                                        val isAudio = audioExtensions.any { ext -> lower.contains(ext) }
                                         val item = TorrentVideoFile(id = id, name = name, path = path, sizeBytes = length)
                                         if (isVideo) {
                                             videoFiles.add(item)
-                                        } else if (length > 50 * 1024 * 1024L) {
+                                        } else if (isAudio) {
+                                            // Музыкальные файлы: отсекаем только пустые/поврежденные < 50 КБ
+                                            if (length > 50 * 1024L) {
+                                                audioFiles.add(item)
+                                            }
+                                        } else if (length > 30 * 1024 * 1024L) {
                                             largeFallback.add(item)
                                         }
                                     }
 
-                                    val resultList = (videoFiles.ifEmpty { largeFallback }).sortedBy { it.path.lowercase() }
+                                    val resultList = when {
+                                        videoFiles.isNotEmpty() -> videoFiles
+                                        audioFiles.isNotEmpty() -> audioFiles
+                                        else -> largeFallback
+                                    }.sortedBy { it.path.lowercase() }
+
                                     if (resultList.isNotEmpty()) {
                                         return@withContext resultList
                                     }

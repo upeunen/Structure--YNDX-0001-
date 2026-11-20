@@ -19,6 +19,7 @@ class RemotePreferences(context: Context) {
         private const val KEY_ENABLED_CATEGORIES = "rutracker_enabled_categories"
         private const val KEY_CUSTOM_CATEGORIES = "rutracker_custom_categories"
         private const val KEY_VOICE_BEEP_ENABLED = "voice_beep_enabled"
+        private const val KEY_VOICE_BEEP_STYLE = "voice_beep_style"
 
         const val DEFAULT_IP = "192.168.100.6"
         const val DEFAULT_PORT = 5555
@@ -70,4 +71,8 @@ class RemotePreferences(context: Context) {
     var voiceBeepEnabled: Boolean
         get() = prefs.getBoolean(KEY_VOICE_BEEP_ENABLED, true)
         set(value) = prefs.edit().putBoolean(KEY_VOICE_BEEP_ENABLED, value).apply()
+
+    var voiceBeepStyle: Int
+        get() = prefs.getInt(KEY_VOICE_BEEP_STYLE, 3)
+        set(value) = prefs.edit().putInt(KEY_VOICE_BEEP_STYLE, value).apply()
 }

@@ -63,6 +63,7 @@ fun SeriesSelectionDialog(
                         .padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
+                    val isMusic = pending.files.firstOrNull()?.isAudio == true
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -70,7 +71,7 @@ fun SeriesSelectionDialog(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Выберите серию / файл",
+                                text = if (isMusic) "Выберите трек" else "Выберите серию / файл",
                                 fontSize = 17.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
@@ -144,7 +145,7 @@ fun SeriesSelectionDialog(
                                             )
                                             if (isLast) {
                                                 Text(
-                                                    text = "• Последняя просмотренная",
+                                                    text = if (file.isAudio) "• Последний включённый" else "• Последняя просмотренная",
                                                     fontSize = 11.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = StatusGreen

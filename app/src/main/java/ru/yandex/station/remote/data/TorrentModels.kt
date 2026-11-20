@@ -24,7 +24,13 @@ data class TorrentVideoFile(
     val name: String,
     val path: String,
     val sizeBytes: Long
-)
+) {
+    val isAudio: Boolean get() {
+        val lower = "$path $name".lowercase()
+        val audioExts = listOf(".flac", ".mp3", ".m4a", ".aac", ".ogg", ".oga", ".wav", ".wma", ".ape", ".wv", ".opus", ".alac", ".ac3", ".dts", ".mka")
+        return audioExts.any { lower.contains(it) }
+    }
+}
 
 data class PendingEpisodeSelection(
     val torrentHash: String,

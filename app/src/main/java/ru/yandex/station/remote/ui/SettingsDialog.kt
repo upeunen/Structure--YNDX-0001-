@@ -38,7 +38,9 @@ fun SettingsDialog(
     currentPort: Int,
     connectionStatus: StationConnectionStatus,
     voiceBeepEnabled: Boolean = true,
+    voiceBeepStyle: Int = 3,
     onToggleVoiceBeep: ((Boolean) -> Unit)? = null,
+    onSelectVoiceBeepStyle: ((Int) -> Unit)? = null,
     onTestVoiceBeep: (() -> Unit)? = null,
     debugLogs: List<String> = emptyList(),
     onTestConnection: () -> Unit,
@@ -197,7 +199,7 @@ fun SettingsDialog(
                                     color = TextPrimary
                                 )
                                 Text(
-                                    text = "Звуковой бип из колонки при отправке голоса в облако",
+                                    text = "Звук начала и окончания передачи голоса в облако",
                                     fontSize = 11.sp,
                                     color = TextSecondary,
                                     lineHeight = 14.sp
@@ -217,21 +219,71 @@ fun SettingsDialog(
                             }
                         }
 
-                        if (voiceBeepEnabled && onTestVoiceBeep != null) {
-                            OutlinedButton(
-                                onClick = onTestVoiceBeep,
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentBlue),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, AccentBlue.copy(alpha = 0.4f)),
-                                modifier = Modifier.fillMaxWidth()
+                        if (voiceBeepEnabled) {
+                            // Выбор стиля звучания
+                            Text(
+                                text = "Стиль звучания:",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextPrimary,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.VolumeUp,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
+                                val styles = listOf(
+                                    1 to "Тон",
+                                    2 to "Перелив",
+                                    3 to "Рация",
+                                    4 to "Клик"
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Проверить звук на Станции", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                styles.forEach { (id, label) ->
+                                    val isSelected = (voiceBeepStyle == id)
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = { onSelectVoiceBeepStyle?.invoke(id) },
+                                        label = {
+                                            Text(
+                                                text = label,
+                                                fontSize = 11.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = AccentYandex,
+                                            selectedLabelColor = Color.Black,
+                                            containerColor = DarkSurface,
+                                            labelColor = TextSecondary
+                                        ),
+                                        border = FilterChipDefaults.filterChipBorder(
+                                            enabled = true,
+                                            selected = isSelected,
+                                            borderColor = if (isSelected) AccentYandex else DarkSurfaceElevated,
+                                            selectedBorderColor = AccentYandex
+                                        ),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+
+                            if (onTestVoiceBeep != null) {
+                                OutlinedButton(
+                                    onClick = onTestVoiceBeep,
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentBlue),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, AccentBlue.copy(alpha = 0.4f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.VolumeUp,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Проверить звуки старта и стопа (демо)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
                             }
                         }
                     }

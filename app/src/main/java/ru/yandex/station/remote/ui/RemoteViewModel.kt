@@ -92,7 +92,8 @@ data class RemoteUiState(
     val pendingBrowserUrl: String? = null,
     val currentMovieReviews: List<MovieReview> = emptyList(),
     val isLoadingReviews: Boolean = false,
-    val voiceBeepEnabled: Boolean = true
+    val voiceBeepEnabled: Boolean = true,
+    val voiceBeepStyle: Int = 3
 )
 
 class RemoteViewModel(application: Application) : AndroidViewModel(application) {
@@ -111,7 +112,8 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             cinemaMovies = historyRepo.getHistory(),
             customAddedCategories = prefs.customAddedCategories,
             enabledShowcaseCategories = prefs.enabledRuTrackerCategories,
-            voiceBeepEnabled = prefs.voiceBeepEnabled
+            voiceBeepEnabled = prefs.voiceBeepEnabled,
+            voiceBeepStyle = prefs.voiceBeepStyle
         )
     )
     val uiState: StateFlow<RemoteUiState> = _uiState.asStateFlow()
@@ -457,11 +459,30 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun setVoiceBeepStyle(style: Int) {
+        prefs.voiceBeepStyle = style
+        _uiState.value = _uiState.value.copy(voiceBeepStyle = style)
+        viewModelScope.launch {
+            StationMediaManager.ensureDeployed(getApplication(), adbClient)
+            adbClient.execute("CLASSPATH=/data/local/tmp/station_media.dex app_process /data/local/tmp ru.yandex.station.media.StationMediaTool set_style $style")
+            adbClient.execute("CLASSPATH=/data/local/tmp/station_media.dex app_process /data/local/tmp ru.yandex.station.media.StationMediaTool demo $style")
+            val styleName = when (style) {
+                1 -> "Тональный"
+                2 -> "Перелив"
+                3 -> "Рация"
+                4 -> "Клик"
+                else -> "Стиль $style"
+            }
+            addLog("Выбран стиль сигнала: $styleName")
+        }
+    }
+
     fun testVoiceBeep() {
         viewModelScope.launch {
             StationMediaManager.ensureDeployed(getApplication(), adbClient)
-            adbClient.execute("CLASSPATH=/data/local/tmp/station_media.dex app_process /data/local/tmp ru.yandex.station.media.StationMediaTool beep")
-            addLog("Тестовый сигнал отправлен на Станцию")
+            val style = _uiState.value.voiceBeepStyle
+            adbClient.execute("CLASSPATH=/data/local/tmp/station_media.dex app_process /data/local/tmp ru.yandex.station.media.StationMediaTool demo $style")
+            addLog("Тестовый сигнал (старт и стоп) отправлен на Станцию")
         }
     }
 
@@ -1171,9 +1192,11 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
             activeSeriesMovie = movie
             activeSeriesFiles = videoFiles
             val saved = historyRepo.getLastProgressForTorrent(torrentHash)
+            val isMusic = videoFiles.firstOrNull()?.isAudio == true
+            val countLabel = if (isMusic) "треков" else "серий/файлов"
             _uiState.value = _uiState.value.copy(
                 isCinemaLoading = false,
-                cinemaStatusMessage = "Найдено серий/файлов: ${videoFiles.size}. Выберите нужный.",
+                cinemaStatusMessage = "Найдено $countLabel: ${videoFiles.size}. Выберите нужный.",
                 pendingEpisodeSelection = PendingEpisodeSelection(
                     torrentHash = torrentHash,
                     movie = movie,
@@ -1237,13 +1260,15 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         vibrate(35)
         val hash = activeSeriesHash ?: return
         val movie = activeSeriesMovie ?: return
+        val isAudio = activeSeriesFiles.firstOrNull()?.isAudio == true
+        val itemLabel = if (isAudio) "трек" else "серия"
         if (activeSeriesIndex + 1 >= activeSeriesFiles.size) {
-            showMessage("Это последняя серия в списке")
+            showMessage("Это последний $itemLabel в списке")
             return
         }
         activeSeriesIndex++
         val nextFile = activeSeriesFiles[activeSeriesIndex]
-        addLog("Переключение на следующую серию: ${nextFile.name}")
+        addLog("Переключение на следующий $itemLabel: ${nextFile.name}")
         viewModelScope.launch {
             bufferAndLaunchFile(hash, nextFile, movie)
         }
@@ -1253,13 +1278,15 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         vibrate(35)
         val hash = activeSeriesHash ?: return
         val movie = activeSeriesMovie ?: return
+        val isAudio = activeSeriesFiles.firstOrNull()?.isAudio == true
+        val itemLabel = if (isAudio) "трек" else "серия"
         if (activeSeriesIndex - 1 < 0) {
-            showMessage("Это первая серия в списке")
+            showMessage("Это первый $itemLabel в списке")
             return
         }
         activeSeriesIndex--
         val prevFile = activeSeriesFiles[activeSeriesIndex]
-        addLog("Переключение на предыдущую серию: ${prevFile.name}")
+        addLog("Переключение на предыдущий $itemLabel: ${prevFile.name}")
         viewModelScope.launch {
             bufferAndLaunchFile(hash, prevFile, movie)
         }
@@ -1318,6 +1345,14 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         playbackMonitorJob = viewModelScope.launch {
             var checks = 0
             var endHits = 0
+            val isAudioFile = file.isAudio
+            // Оценка длительности аудиофайла по размеру (FLAC ~120 КБ/с, MP3 ~40 КБ/с)
+            val estimatedDurationSec = if (isAudioFile && file.sizeBytes > 0) {
+                val lower = file.name.lowercase()
+                val bytesPerSec = if (lower.endsWith(".flac") || lower.endsWith(".wav") || lower.endsWith(".ape")) 120 * 1024L else 40 * 1024L
+                (file.sizeBytes / bytesPerSec).coerceIn(45L, 3600L)
+            } else 0L
+
             while (true) {
                 delay(5000)
                 checks++
@@ -1345,17 +1380,33 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                         )
                         historyRepo.savePlaybackProgress(torrentHash, file.id, file.name, activePositionSec)
                     }
-                    if (checks >= 6 && activeSeriesFiles.size > 1) {
+
+                    if (activeSeriesFiles.size > 1) {
+                        val psRes = adbClient.execute("ps | grep -i vlc")
+                        val vlcRunning = psRes.getOrNull().orEmpty().contains("vlc")
+
                         val stopped = session != null && (session.first == 0 || session.first == 1)
-                        var gone = false
-                        if (session == null) {
-                            val psRes = adbClient.execute("ps | grep -i vlc")
-                            val running = psRes.getOrNull().orEmpty()
-                            gone = psRes.isSuccess && !running.contains("vlc")
+                        val gone = !vlcRunning
+
+                        // Автопереключение:
+                        // Для музыки не переключаем на первых секундах ни в коем случае,
+                        // только если плеер реально завершил работу (gone) или трек доиграл до расчетного конца
+                        val canTriggerEnd = if (isAudioFile) {
+                            if (gone && checks >= 4) {
+                                true
+                            } else if (stopped && (activePositionSec >= (estimatedDurationSec * 0.85).toLong() || checks >= 24)) {
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            checks >= 12 && (stopped || gone)
                         }
-                        if (stopped || gone) endHits++ else endHits = 0
+
+                        if (canTriggerEnd) endHits++ else endHits = 0
                         if (endHits >= 2) {
-                            addLog("Плеер завершил серию ${file.name}")
+                            val label = if (isAudioFile) "трек" else "серию"
+                            addLog("Плеер завершил $label ${file.name}")
                             if (activeSeriesIndex + 1 < activeSeriesFiles.size) {
                                 historyRepo.savePlaybackProgress(torrentHash, file.id, file.name, 0L)
                                 playNextEpisode()
@@ -1423,6 +1474,13 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         bufferingJob?.cancel()
         userRequestedContinue = false
 
+        // Для музыки целевой буфер уменьшен (2 МБ), чтобы трек стартовал мгновенно
+        val actualTargetBytes = if (file.isAudio) {
+            minOf(2 * 1024 * 1024L, if (file.sizeBytes > 0) file.sizeBytes / 4 else targetBufferBytes)
+        } else {
+            targetBufferBytes
+        }
+
         _uiState.value = _uiState.value.copy(
             isCinemaLoading = true,
             bufferingStatus = BufferingStatus(
@@ -1432,7 +1490,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                 torrentHash = torrentHash,
                 fileId = file.id,
                 currentBytes = 0L,
-                targetBytes = targetBufferBytes,
+                targetBytes = actualTargetBytes,
                 isSlowWarning = false,
                 movie = movie,
                 file = file
@@ -1452,12 +1510,12 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
 
                 val elapsed = System.currentTimeMillis() - startTime
                 // Если прошло более 22 секунд, буфер еще не набран и пользователь еще не подтверждал продолжение
-                if (elapsed > 22000L && filled < targetBufferBytes && !userRequestedContinue && !warningShown) {
+                if (elapsed > 22000L && filled < actualTargetBytes && !userRequestedContinue && !warningShown) {
                     warningShown = true
                     _uiState.value = _uiState.value.copy(
                         bufferingStatus = _uiState.value.bufferingStatus.copy(
                             currentBytes = filled,
-                            targetBytes = targetBufferBytes,
+                            targetBytes = actualTargetBytes,
                             downloadSpeedBytes = liveStats?.downloadSpeedBytes ?: 0L,
                             activePeers = liveStats?.activePeers ?: 0,
                             totalPeers = liveStats?.totalPeers ?: 0,
@@ -1468,7 +1526,7 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                     _uiState.value = _uiState.value.copy(
                         bufferingStatus = _uiState.value.bufferingStatus.copy(
                             currentBytes = filled,
-                            targetBytes = targetBufferBytes,
+                            targetBytes = actualTargetBytes,
                             downloadSpeedBytes = liveStats?.downloadSpeedBytes ?: 0L,
                             activePeers = liveStats?.activePeers ?: 0,
                             totalPeers = liveStats?.totalPeers ?: 0,
@@ -1477,8 +1535,8 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
                     )
                 }
 
-                if (filled >= targetBufferBytes) {
-                    addLog("Буфер успешно набран: $filled байт (цель: $targetBufferBytes байт)")
+                if (filled >= actualTargetBytes) {
+                    addLog("Буфер успешно набран: $filled байт (цель: $actualTargetBytes байт)")
                     break
                 }
 
@@ -1500,14 +1558,15 @@ class RemoteViewModel(application: Application) : AndroidViewModel(application) 
         val cacheExtra = "--ei network-caching 15000 --es extra_network_caching 15000 "
         val streamUrl = torrServerClient.getStreamUrl(torrentHash, file.id)
 
-        // Запуск VLC плеера напрямую с увеличенным сетевым кэшем 15 секунд
+        // Запуск VLC плеера напрямую: для аудио передаем audio/*, для видео video/*
+        val mimeType = if (file.isAudio) "audio/*" else "video/*"
         val adbCmd = "am force-stop org.smarttube.stable; am force-stop org.videolan.vlc; " +
             "(svc power stayon true; settings put secure screensaver_enabled 0; settings put secure enabled_accessibility_services ''; settings put secure accessibility_enabled 0; input keyevent 224) >/dev/null 2>&1 & " +
-            "am start -n org.videolan.vlc/.StartActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" $posExtra$cacheExtra"
+            "am start -n org.videolan.vlc/.StartActivity -a android.intent.action.VIEW -d \"$streamUrl\" -t \"$mimeType\" $posExtra$cacheExtra"
         var adbResult = adbClient.execute(adbCmd)
 
         if (!adbResult.isSuccess) {
-            adbResult = adbClient.execute("am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"video/*\" -p org.videolan.vlc $posExtra$cacheExtra")
+            adbResult = adbClient.execute("am start -a android.intent.action.VIEW -d \"$streamUrl\" -t \"$mimeType\" -p org.videolan.vlc $posExtra$cacheExtra")
         }
 
         if (adbResult.isSuccess) {
